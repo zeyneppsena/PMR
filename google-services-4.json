@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "906068760844",
+    "project_id": "pmar-33256",
+    "storage_bucket": "pmar-33256.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:906068760844:android:4c22c81be7b1b42244d129",
+        "android_client_info": {
+          "package_name": "com.zeynep.pmr"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBXp7jQ6NHplbbsHACAu1Ia885iPA_jE78"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
