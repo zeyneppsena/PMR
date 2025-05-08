@@ -1,3 +1,5 @@
+// AddShip.tsx – Ships CRUD (No Equipment Picker) – May 2025
+
 import React, { useState, useEffect } from 'react';
 import {
     View,
@@ -9,51 +11,42 @@ import {
     TouchableOpacity,
     Modal,
     Pressable,
-    FlatList
+    FlatList,
+    SafeAreaView,
 } from 'react-native';
 import {
     collection,
     addDoc,
     updateDoc,
     doc,
-    onSnapshot
+    onSnapshot,
 } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
 
-const PRIMARY_COLOR = '#4CAF50'; // Vurgu rengi (yeşil tonlu)
-const DARK_BG = '#121212';
-const MODAL_BG = '#1E1E1E';
+/*──────────────── Palette ────────────────*/
+const COLORS = {
+    bg: '#121212',
+    surface: '#1E1E1E',
+    accent: '#4ECDC4',
+    success: '#66BB6A',
+    warn: '#e57373',
+    text: '#FFFFFF',
+    secondary: '#B0B0B0',
+    overlay: 'rgba(0,0,0,0.7)',
+};
 
 const AddShip = ({ navigation, route, userRole }) => {
-    // Kullanıcı rolü kontrolü
     const isAdmin = userRole === 'main-admin';
-
-    console.error('userRole:', userRole);
-
-
-
-    // "Düzenleme" modunda mı, yoksa yeni gemi mi ekleniyor?
     const editingShip = route.params?.ship || null;
 
-    // Gemi bilgileri
     const [name, setName] = useState('');
     const [imo, setImo] = useState('');
     const [port, setPort] = useState('');
     const [captain, setCaptain] = useState('');
-
-    // Personel & Ekipman ID listeleri
-    const [users, setUsers] = useState([]);
-    const [equipments, setEquipments] = useState([]);
-
-    // Modal görünürlük durumları
+    const [users, setUsers] = useState<string[]>([]);
+    const [availableUsers, setAvailableUsers] = useState<any[]>([]);
     const [userModalVisible, setUserModalVisible] = useState(false);
-    const [equipmentModalVisible, setEquipmentModalVisible] = useState(false);
 
-    // Firestore'dan çekilen mevcut kullanıcı ve ekipman listeleri
-    const [availableUsers, setAvailableUsers] = useState([]);
-    const [availableEquipments, setAvailableEquipments] = useState([]);
-
-    // Sayfa açıldığında, eğer düzenleme modundaysak formu doldur
     useEffect(() => {
         if (editingShip) {
             setName(editingShip.name);
@@ -61,464 +54,265 @@ const AddShip = ({ navigation, route, userRole }) => {
             setPort(editingShip.port);
             setCaptain(editingShip.captain);
             setUsers(editingShip.users || []);
-            setEquipments(editingShip.equipments || []);
         }
     }, [editingShip]);
 
-    // Kullanıcı listesini Firestore'dan çek
-    useEffect(() => {
-        const unsubscribe = onSnapshot(collection(db, 'users'), (snapshot) => {
-            const data = snapshot.docs.map((doc) => ({
-                id: doc.id,
-                ...doc.data()
-            }));
-            setAvailableUsers(data);
-        });
-        return () => unsubscribe();
-    }, []);
+    useEffect(
+        () =>
+            onSnapshot(collection(db, 'users'), snap =>
+                setAvailableUsers(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+            ),
+        [],
+    );
 
-    // Ekipman listesini Firestore'dan çek
-    useEffect(() => {
-        const unsubscribe = onSnapshot(collection(db, 'equipments'), (snapshot) => {
-            const data = snapshot.docs.map((doc) => ({
-                id: doc.id,
-                ...doc.data()
-            }));
-            setAvailableEquipments(data);
-        });
-        return () => unsubscribe();
-    }, []);
-
-    // Gemi kaydetme veya güncelleme
     const handleSave = async () => {
-        // Admin değilse kaydet/güncelleme işlemlerini engelliyoruz
-        if (!isAdmin) {
-            Alert.alert('Yetkisiz işlem', 'Bu işlemi yapmaya yetkiniz yok.');
-            return;
-        }
-
-        // Zorunlu alanlar boşsa uyarı ver
-        if (!name || !imo || !port || !captain) {
-            Alert.alert('Lütfen tüm alanları doldurun.');
-            return;
-        }
+        if (!isAdmin) return Alert.alert('Yetkisiz', 'Bu işlemi yapamazsınız.');
+        if (!name || !imo || !port || !captain)
+            return Alert.alert('Eksik Bilgi', 'Lütfen tüm alanları doldurun.');
 
         try {
             if (editingShip) {
-                // Gemi güncelle
-                const shipRef = doc(db, 'ships', editingShip.id);
-                await updateDoc(shipRef, {
+                await updateDoc(doc(db, 'ships', editingShip.id), {
                     name,
                     imo,
                     port,
                     captain,
                     users,
-                    equipments
                 });
-                Alert.alert('Gemi bilgileri güncellendi!');
+                Alert.alert('Güncellendi', 'Gemi bilgileri güncellendi.');
             } else {
-                // Yeni gemi ekle
                 await addDoc(collection(db, 'ships'), {
                     name,
                     imo,
                     port,
                     captain,
-                    users: [],       // Yeni gemide başlangıçta boş
-                    equipments: []   // Yeni gemide başlangıçta boş
+                    users: [],
                 });
-                Alert.alert('Gemi başarıyla eklendi!');
+                Alert.alert('Kaydedildi', 'Gemi başarıyla eklendi.');
             }
             navigation.goBack();
-        } catch (error) {
-            console.error('Hata:', error);
-            Alert.alert('Bir hata oluştu, tekrar deneyin.');
+        } catch (err) {
+            console.error(err);
+            Alert.alert('Hata', 'İşlem sırasında hata oluştu.');
         }
     };
 
-    // ----- Personel Seçme Fonksiyonları -----
-    const openUserModal = () => setUserModalVisible(true);
-    const closeUserModal = () => setUserModalVisible(false);
-
-    const toggleSelectUser = (userId) => {
-        if (users.includes(userId)) {
-            setUsers(users.filter((id) => id !== userId));
-        } else {
-            setUsers([...users, userId]);
-        }
+    const toggleSelect = (
+        arr: string[],
+        setArr: React.Dispatch<React.SetStateAction<string[]>>,
+        id: string,
+    ) => {
+        arr.includes(id)
+            ? setArr(arr.filter(i => i !== id))
+            : setArr([...arr, id]);
     };
 
-    // ----- Ekipman Seçme Fonksiyonları -----
-    const openEquipmentModal = () => setEquipmentModalVisible(true);
-    const closeEquipmentModal = () => setEquipmentModalVisible(false);
-
-    const toggleSelectEquipment = (equipmentId) => {
-        if (equipments.includes(equipmentId)) {
-            setEquipments(equipments.filter((id) => id !== equipmentId));
-        } else {
-            setEquipments([...equipments, equipmentId]);
-        }
-    };
-
-    // ----- Seçili Personel / Ekipman Silme -----
-    const removeUser = (userId) => {
-        setUsers(users.filter((id) => id !== userId));
-    };
-    const removeEquipment = (equipmentId) => {
-        setEquipments(equipments.filter((id) => id !== equipmentId));
-    };
-
-    // ID'den isme ulaşma
-    const getUserNameById = (id) => {
-        const user = availableUsers.find((u) => u.id === id);
-        return user ? (user.name || user.email || user.id) : id;
-    };
-    const getEquipmentNameById = (id) => {
-        const eq = availableEquipments.find((e) => e.id === id);
-        return eq ? (eq.name || eq.id) : id;
-    };
+    const findName = (id: string, list: any[]) =>
+        list.find(i => i.id === id)?.name || id;
 
     return (
-        <View style={styles.screen}>
+        <SafeAreaView style={styles.screen}>
             <ScrollView contentContainerStyle={styles.container}>
                 <Text style={styles.title}>
-                    {editingShip ? 'Gemi Bilgilerini Görüntüle/Düzenle' : 'Yeni Gemi Ekle'}
+                    {editingShip ? 'Gemi Bilgileri' : 'Yeni Gemi Ekle'}
                 </Text>
 
-                {/* Form Alanları */}
-                <Text style={styles.label}>Gemi Adı</Text>
-                <TextInput
-                    style={styles.input}
-                    placeholder="örn. MV Oceanic"
-                    placeholderTextColor="#888"
-                    value={name}
-                    onChangeText={setName}
-                    editable={isAdmin}
-                />
+                {[
+                    ['Gemi Adı', name, setName, 'örn. MV Oceanic', 'default'],
+                    ['IMO No', imo, setImo, 'örn. 1234567', 'numeric'],
+                    ['Liman', port, setPort, 'örn. İstanbul', 'default'],
+                    ['Kaptan', captain, setCaptain, 'örn. Ahmet Yılmaz', 'default'],
+                ].map(([label, val, setter, ph, kb]) => (
+                    <View key={label as string} style={{ marginTop: 18 }}>
+                        <TextInput
+                            style={styles.input}
+                            value={val as string}
+                            onChangeText={setter as any}
+                            placeholder={ph as string}
+                            placeholderTextColor={COLORS.secondary}
+                            keyboardType={kb as any}
+                            editable={isAdmin}
+                        />
+                    </View>
+                ))}
 
-                <Text style={styles.label}>IMO No</Text>
-                <TextInput
-                    style={styles.input}
-                    placeholder="örn. 1234567"
-                    placeholderTextColor="#888"
-                    value={imo}
-                    onChangeText={setImo}
-                    keyboardType="numeric"
-                    editable={isAdmin}
-                />
-
-                <Text style={styles.label}>Liman</Text>
-                <TextInput
-                    style={styles.input}
-                    placeholder="örn. İstanbul"
-                    placeholderTextColor="#888"
-                    value={port}
-                    onChangeText={setPort}
-                    editable={isAdmin}
-                />
-
-                <Text style={styles.label}>Kaptan</Text>
-                <TextInput
-                    style={styles.input}
-                    placeholder="örn. Ahmet Yılmaz"
-                    placeholderTextColor="#888"
-                    value={captain}
-                    onChangeText={setCaptain}
-                    editable={isAdmin}
-                />
-
-                {/* ----- Sorumlu Personel ----- */}
                 <View style={styles.section}>
                     <Text style={styles.subLabel}>Sorumlu Personeller</Text>
-                    {users.length === 0 ? (
-                        <Text style={styles.emptyText}>Henüz kimse seçilmedi</Text>
-                    ) : (
-                        <View style={styles.selectedList}>
-                            {users.map((id) => (
-                                <View key={id} style={styles.selectedItem}>
-                                    <Text style={styles.selectedName}>{getUserNameById(id)}</Text>
-                                    {/* Yalnızca Admin silme yapabilsin */}
+                    {users.length ? (
+                        <View style={styles.chipWrap}>
+                            {users.map(id => (
+                                <View key={id} style={styles.chip}>
+                                    <Text style={styles.chipText}>
+                                        {findName(id, availableUsers)}
+                                    </Text>
                                     {isAdmin && (
-                                        <TouchableOpacity onPress={() => removeUser(id)}>
+                                        <TouchableOpacity
+                                            onPress={() =>
+                                                toggleSelect(users, setUsers, id)
+                                            }>
                                             <Text style={styles.removeX}>×</Text>
                                         </TouchableOpacity>
                                     )}
                                 </View>
                             ))}
                         </View>
-                    )}
-
-                    {/* Personel Seç butonu sadece Admin'e görünsün */}
-                    {isAdmin && (
-                        <TouchableOpacity style={styles.accentButton} onPress={openUserModal}>
-                            <Text style={styles.accentButtonText}>Personel Seç</Text>
-                        </TouchableOpacity>
-                    )}
-                </View>
-
-                {/* ----- Ekipmanlar ----- */}
-                <View style={styles.section}>
-                    <Text style={styles.subLabel}>Ekipmanlar</Text>
-                    {equipments.length === 0 ? (
-                        <Text style={styles.emptyText}>Henüz ekipman yok</Text>
                     ) : (
-                        <View style={styles.selectedList}>
-                            {equipments.map((id) => (
-                                <View key={id} style={styles.selectedItem}>
-                                    <Text style={styles.selectedName}>{getEquipmentNameById(id)}</Text>
-                                    {/* Yalnızca Admin silme yapabilsin */}
-                                    {isAdmin && (
-                                        <TouchableOpacity onPress={() => removeEquipment(id)}>
-                                            <Text style={styles.removeX}>×</Text>
-                                        </TouchableOpacity>
-                                    )}
-                                </View>
-                            ))}
-                        </View>
+                        <Text style={styles.emptyText}>Seçilmedi</Text>
                     )}
-                    {/* Ekipman Seç butonu sadece Admin'e görünsün */}
+
                     {isAdmin && (
-                        <TouchableOpacity style={styles.accentButton} onPress={openEquipmentModal}>
-                            <Text style={styles.accentButtonText}>Ekipman Seç</Text>
+                        <TouchableOpacity
+                            style={styles.accentBtn}
+                            onPress={() => setUserModalVisible(true)}>
+                            <Text style={styles.accentBtnText}>Personel Seç</Text>
                         </TouchableOpacity>
                     )}
                 </View>
 
-                {/* Kaydet/Güncelle butonu da yalnızca Admin’e görünsün */}
                 {isAdmin && (
-                    <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-                        <Text style={styles.saveButtonText}>
-                            {editingShip ? 'Güncelle' : 'Gemi Kaydet'}
+                    <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
+                        <Text style={styles.saveBtnText}>
+                            {editingShip ? 'Güncelle' : 'Kaydet'}
                         </Text>
                     </TouchableOpacity>
                 )}
             </ScrollView>
 
-            {/* ------ Personel Seç Modal ------ */}
+            {/*──────── Users Modal ────────*/}
             {isAdmin && (
                 <Modal
                     visible={userModalVisible}
                     transparent
                     animationType="slide"
-                    onRequestClose={closeUserModal}
-                >
+                    onRequestClose={() => setUserModalVisible(false)}>
                     <View style={styles.modalOverlay}>
-                        <Pressable style={styles.modalBG} onPress={closeUserModal} />
+                        <Pressable
+                            style={styles.modalBG}
+                            onPress={() => setUserModalVisible(false)}
+                        />
                         <View style={styles.modalContent}>
                             <Text style={styles.modalTitle}>Personel Seç</Text>
                             <FlatList
                                 data={availableUsers}
-                                keyExtractor={(item) => item.id}
+                                keyExtractor={i => i.id}
                                 renderItem={({ item }) => {
-                                    const isSelected = users.includes(item.id);
+                                    const selected = users.includes(item.id);
                                     return (
                                         <TouchableOpacity
                                             style={[
                                                 styles.listItem,
-                                                isSelected && styles.listItemSelected
+                                                selected && styles.listItemSel,
                                             ]}
-                                            onPress={() => toggleSelectUser(item.id)}
-                                        >
-                                            <Text style={styles.listItemText}>
-                                                {item.name || item.email}
+                                            onPress={() =>
+                                                toggleSelect(users, setUsers, item.id)
+                                            }>
+                                            <Text style={styles.listItemTxt}>
+                                                {item.name || item.email || item.id}
                                             </Text>
-                                            {isSelected && <Text style={styles.checkMark}>✓</Text>}
+                                            {selected && <Text style={styles.check}>✓</Text>}
                                         </TouchableOpacity>
                                     );
                                 }}
                             />
-                            <TouchableOpacity style={styles.accentButton} onPress={closeUserModal}>
-                                <Text style={styles.accentButtonText}>Kapat</Text>
+                            <TouchableOpacity
+                                style={styles.accentBtn}
+                                onPress={() => setUserModalVisible(false)}>
+                                <Text style={styles.accentBtnText}>Kapat</Text>
                             </TouchableOpacity>
                         </View>
                     </View>
                 </Modal>
             )}
-
-            {/* ------ Ekipman Seç Modal ------ */}
-            {isAdmin && (
-                <Modal
-                    visible={equipmentModalVisible}
-                    transparent
-                    animationType="slide"
-                    onRequestClose={closeEquipmentModal}
-                >
-                    <View style={styles.modalOverlay}>
-                        <Pressable style={styles.modalBG} onPress={closeEquipmentModal} />
-                        <View style={styles.modalContent}>
-                            <Text style={styles.modalTitle}>Ekipman Seç</Text>
-                            <FlatList
-                                data={availableEquipments}
-                                keyExtractor={(item) => item.id}
-                                renderItem={({ item }) => {
-                                    const isSelected = equipments.includes(item.id);
-                                    return (
-                                        <TouchableOpacity
-                                            style={[
-                                                styles.listItem,
-                                                isSelected && styles.listItemSelected
-                                            ]}
-                                            onPress={() => toggleSelectEquipment(item.id)}
-                                        >
-                                            <Text style={styles.listItemText}>
-                                                {item.name || 'isimsiz'}
-                                            </Text>
-                                            {isSelected && <Text style={styles.checkMark}>✓</Text>}
-                                        </TouchableOpacity>
-                                    );
-                                }}
-                            />
-                            <TouchableOpacity style={styles.accentButton} onPress={closeEquipmentModal}>
-                                <Text style={styles.accentButtonText}>Kapat</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </Modal>
-            )}
-        </View>
+        </SafeAreaView>
     );
 };
 
 export default AddShip;
 
-/* ----- Stil Tanımları ----- */
-
+/*──────────────── Styles ────────────────*/
 const styles = StyleSheet.create({
-    screen: {
-        flex: 1,
-        backgroundColor: DARK_BG
-    },
-    container: {
-        padding: 20,
-        paddingBottom: 50
-    },
+    screen: { flex: 1, backgroundColor: COLORS.bg },
+    container: { padding: 20, paddingBottom: 60 },
     title: {
         fontSize: 22,
-        fontWeight: 'bold',
-        color: '#FFFFFF',
-        marginBottom: 15
+        fontWeight: '800',
+        color: COLORS.accent,
+        marginBottom: 15,
+        textAlign: 'center',
     },
-    label: {
-        color: '#ffffff',
-        fontWeight: '700',
-        marginTop: 15
-    },
+    label: { color: COLORS.secondary, fontWeight: '700', marginBottom: 6 },
     input: {
+        backgroundColor: COLORS.surface,
+        color: COLORS.text,
+        padding: 12,
+        borderRadius: 8,
         borderWidth: 1,
-        borderColor: '#444',
-        backgroundColor: '#1C1C1C',
-        padding: 10,
-        marginTop: 5,
-        borderRadius: 5,
-        color: '#fff'
+        borderColor: COLORS.accent,
     },
-    subLabel: {
-        fontWeight: '600',
-        fontSize: 16,
-        marginBottom: 5,
-        color: '#ffffff'
-    },
-    emptyText: {
-        color: '#777',
-        marginBottom: 5
-    },
-    section: {
-        marginTop: 25
-    },
-    // Seçili personel/ekipmanların minik kart görünümü
-    selectedList: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        marginBottom: 8
-    },
-    selectedItem: {
+    section: { marginTop: 28 },
+    subLabel: { color: COLORS.text, fontSize: 16, fontWeight: '700' },
+    emptyText: { color: COLORS.secondary, marginTop: 4 },
+    chipWrap: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 6 },
+    chip: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#2A2A2A',
-        borderRadius: 15,
+        backgroundColor: COLORS.surface,
+        borderRadius: 14,
         paddingHorizontal: 10,
-        paddingVertical: 5,
+        paddingVertical: 4,
         marginRight: 8,
-        marginBottom: 8
+        marginTop: 8,
     },
-    selectedName: {
-        marginRight: 8,
-        color: '#FFFFFF'
-    },
-    removeX: {
-        color: '#FF5555',
-        fontWeight: 'bold',
-        fontSize: 16
-    },
-    // Kaydet Butonu
-    saveButton: {
-        backgroundColor: PRIMARY_COLOR,
-        paddingVertical: 12,
-        borderRadius: 6,
-        marginTop: 30,
-        alignItems: 'center'
-    },
-    saveButtonText: {
-        color: '#fff',
-        fontSize: 16,
-        fontWeight: '600'
-    },
-    // Accent Buton (Personel/Ekipman seç butonları vs)
-    accentButton: {
-        backgroundColor: PRIMARY_COLOR,
+    chipText: { color: COLORS.text, marginRight: 6 },
+    removeX: { color: COLORS.warn, fontSize: 18, fontWeight: '800' },
+    accentBtn: {
+        backgroundColor: COLORS.accent,
         paddingVertical: 10,
-        paddingHorizontal: 15,
-        borderRadius: 6,
+        paddingHorizontal: 16,
+        borderRadius: 8,
         marginTop: 10,
+        alignSelf: 'flex-start',
+    },
+    accentBtnText: { color: COLORS.bg, fontWeight: '700' },
+    saveBtn: {
+        backgroundColor: COLORS.success,
+        paddingVertical: 14,
+        borderRadius: 10,
+        marginTop: 35,
         alignItems: 'center',
-        alignSelf: 'flex-start'
     },
-    accentButtonText: {
-        color: '#fff',
-        fontSize: 15,
-        fontWeight: '600'
-    },
-    // Modal
+    saveBtnText: { color: COLORS.bg, fontSize: 16, fontWeight: '800' },
     modalOverlay: {
         flex: 1,
         justifyContent: 'center',
-        alignItems: 'center'
+        alignItems: 'center',
     },
     modalBG: {
         ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(0,0,0,0.6)'
+        backgroundColor: COLORS.overlay,
     },
     modalContent: {
         width: '85%',
-        backgroundColor: MODAL_BG,
-        borderRadius: 10,
-        padding: 16,
-        maxHeight: '70%'
+        maxHeight: '75%',
+        backgroundColor: COLORS.surface,
+        borderRadius: 12,
+        padding: 18,
     },
     modalTitle: {
+        color: COLORS.accent,
         fontSize: 20,
-        fontWeight: 'bold',
-        color: '#fff',
+        fontWeight: '800',
         marginBottom: 10,
-        alignSelf: 'center'
+        textAlign: 'center',
     },
-    // Liste item (modal içi)
     listItem: {
-        padding: 12,
-        borderBottomWidth: 1,
-        borderBottomColor: '#333',
+        paddingVertical: 12,
+        borderBottomWidth: 0.5,
+        borderBottomColor: COLORS.secondary,
         flexDirection: 'row',
-        justifyContent: 'space-between'
+        justifyContent: 'space-between',
     },
-    listItemSelected: {
-        backgroundColor: '#2f4032'
-    },
-    listItemText: {
-        fontSize: 16,
-        color: '#ccc'
-    },
-    checkMark: {
-        fontSize: 18,
-        // yeşil onay işareti
-        color: '#66ff66'
-    }
+    listItemSel: { backgroundColor: '#264C46' },
+    listItemTxt: { color: COLORS.text, fontSize: 16 },
+    check: { color: COLORS.accent, fontSize: 18, fontWeight: '800' },
 });

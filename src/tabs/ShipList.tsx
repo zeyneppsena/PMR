@@ -1,116 +1,162 @@
-import React, { useEffect, useState, useLayoutEffect } from 'react';
+import React, { useEffect, useState, useLayoutEffect, useCallback } from 'react';
 import {
+    SafeAreaView,
     View,
     Text,
-    FlatList,
+    SectionList,
+    TextInput,
     TouchableOpacity,
     StyleSheet,
     ActivityIndicator,
-    SafeAreaView,
-    Dimensions
+    RefreshControl,
+    Alert,
 } from 'react-native';
-import { collection, onSnapshot } from 'firebase/firestore';
-import { db } from '../../firebaseConfig';
 import { Ionicons } from '@expo/vector-icons';
+import { collection, onSnapshot, deleteDoc, doc } from 'firebase/firestore';
+import { db } from '../../firebaseConfig';
 
-const screenWidth = Dimensions.get('window').width;
+/*──────── Palette ────────*/
+const COLORS = {
+    bg: '#121212',
+    surface: '#1E1E1E',
+    accent: '#4ECDC4',
+    warn: '#e57373',
+    textPrimary: '#FFFFFF',
+    textSecondary: '#B0B0B0',
+    border: '#313131',
+    overlay: 'rgba(0,0,0,0.7)',
+};
 
 const ShipList = ({ navigation, userRole }) => {
     const isAdmin = userRole === 'main-admin';
-
     const [ships, setShips] = useState([]);
+    const [sections, setSections] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [search, setSearch] = useState('');
+    const [refreshing, setRefreshing] = useState(false);
 
-    useLayoutEffect(() => {
-        if (isAdmin) {
-            navigation.setOptions({
-                headerRight: () => (
-                    <TouchableOpacity
-                        onPress={() => navigation.navigate('AddShip', { userRole })}
-                        style={{ marginRight: 15 }}
-                    >
-                        <Ionicons name="add" size={28} color="#4EDCC4" />
-                    </TouchableOpacity>
-                )
-            });
-        } else {
-            navigation.setOptions({ headerRight: () => null });
-        }
-    }, [navigation, isAdmin]);
 
     useEffect(() => {
-        const unsubscribe = onSnapshot(collection(db, 'ships'), (snapshot) => {
-            const data = snapshot.docs.map((doc) => ({
-                id: doc.id,
-                ...doc.data()
-            }));
+        const unsub = onSnapshot(collection(db, 'ships'), snap => {
+            const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
             setShips(data);
             setLoading(false);
         });
-        return () => unsubscribe();
+        return () => unsub();
     }, []);
 
+    const buildSections = useCallback(() => {
+        const filtered = ships.filter(s => s.name.toLowerCase().includes(search.toLowerCase()));
+        const grouped = filtered.reduce((acc, ship) => {
+            const key = ship.port || 'Diğer';
+            if (!acc[key]) acc[key] = [];
+            acc[key].push(ship);
+            return acc;
+        }, {});
+        const secs = Object.keys(grouped).map(port => ({
+            title: port,
+            data: grouped[port].sort((a, b) => a.name.localeCompare(b.name)),
+        }));
+        setSections(secs);
+    }, [ships, search]);
+
+    useEffect(() => {
+        buildSections();
+    }, [ships, search]);
+
+    const onRefresh = () => {
+        setRefreshing(true);
+        setTimeout(() => setRefreshing(false), 500);
+    };
+
+    const deleteShip = async (id) => {
+        Alert.alert('Emin misiniz?', 'Bu gemi silinecek.', [
+            { text: 'İptal', style: 'cancel' },
+            {
+                text: 'Sil',
+                style: 'destructive',
+                onPress: async () => {
+                    try {
+                        await deleteDoc(doc(db, 'ships', id));
+                        Alert.alert('Silindi', 'Gemi silindi.');
+                    } catch (err) {
+                        console.error(err);
+                        Alert.alert('Hata', 'Silme sırasında hata oluştu.');
+                    }
+                },
+            },
+        ]);
+    };
+
     const renderItem = ({ item }) => (
-        <TouchableOpacity
-            style={styles.cardWrapper}
-            onPress={() => navigation.navigate('AddShip', { ship: item, userRole })}
-        >
-            <View style={styles.card}>
-                <Text style={styles.cardTitle}>{item.name}</Text>
-                <View style={styles.infoRow}>
-                    <Text style={styles.label}>IMO No:</Text>
-                    <Text style={styles.value}>{item.imo}</Text>
-                </View>
-                <View style={styles.infoRow}>
-                    <Text style={styles.label}>Liman:</Text>
-                    <Text style={styles.value}>{item.port}</Text>
-                </View>
-                <View style={styles.infoRow}>
-                    <Text style={styles.label}>Kaptan:</Text>
-                    <Text style={styles.value}>{item.captain}</Text>
-                </View>
+        <View style={styles.itemCard}>
+            <View style={styles.itemHeader}>
+                <Ionicons name="boat-outline" size={20} color={COLORS.accent} />
+                <Text style={styles.itemTitle}>{item.name}</Text>
+                {isAdmin && (
+                    <View style={styles.headerActions}>
+                        <TouchableOpacity onPress={() => navigation.navigate('AddShip', { ship: item, userRole })}>
+                            <Ionicons name="create-outline" size={18} color={COLORS.accent} />
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => deleteShip(item.id)}>
+                            <Ionicons name="trash-outline" size={18} color={COLORS.warn} />
+                        </TouchableOpacity>
+                    </View>
+                )}
             </View>
-        </TouchableOpacity>
+
+            <View style={styles.row}>
+                <Ionicons name="barcode-outline" size={16} color={COLORS.accent} />
+                <Text style={styles.itemText}>IMO: {item.imo}</Text>
+            </View>
+            <View style={styles.row}>
+                <Ionicons name="person-outline" size={16} color={COLORS.accent} />
+                <Text style={styles.itemText}>Kaptan: {item.captain}</Text>
+            </View>
+        </View>
     );
 
-    const renderHeader = () => (
-        <View style={styles.header}>
-            <Text style={styles.headerTitle}>Gemi Listesi</Text>
-            <Text style={styles.headerSubtitle}>
-                Kayıtlı gemileri görüntüleyebilir{isAdmin ? ' ve düzenleyebilirsiniz.' : '.'}
-            </Text>
+    const renderSectionHeader = ({ section: { title } }) => (
+        <View style={styles.sectionHeader}>
+            <Ionicons name="location-outline" size={16} color={COLORS.accent} style={{ marginRight: 6 }} />
+            <Text style={styles.sectionTitle}>{title}</Text>
         </View>
     );
 
     if (loading) {
         return (
-            <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#4EDCC4" />
+            <View style={styles.center}>
+                <ActivityIndicator size="large" color={COLORS.accent} />
             </View>
         );
     }
 
     return (
         <SafeAreaView style={styles.container}>
-            <FlatList
-                data={ships}
-                keyExtractor={(item) => item.id}
+            <TextInput
+                placeholder="Gemi ara..."
+                placeholderTextColor={COLORS.textSecondary}
+                style={styles.searchBar}
+                value={search}
+                onChangeText={setSearch}
+            />
+            <SectionList
+                sections={sections}
+                keyExtractor={item => item.id}
                 renderItem={renderItem}
-                ListHeaderComponent={renderHeader}
-                contentContainerStyle={{ paddingBottom: 80 }}
+                renderSectionHeader={renderSectionHeader}
+                stickySectionHeadersEnabled={false}
+                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />}
                 ListEmptyComponent={
-                    <View style={styles.emptyContainer}>
-                        <Text style={styles.emptyText}>Henüz bir gemi eklenmemiş.</Text>
+                    <View style={styles.center}>
+                        <Text style={{ color: COLORS.textSecondary }}>Eşleşen gemi bulunamadı.</Text>
                     </View>
                 }
+                contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
             />
-
             {isAdmin && (
-                <TouchableOpacity
-                    style={styles.fab}
-                    onPress={() => navigation.navigate('AddShip', { userRole })}
-                >
-                    <Ionicons name="add" size={32} color="white" />
+                <TouchableOpacity style={styles.fab} onPress={() => navigation.navigate('AddShip', { userRole })}>
+                    <Ionicons name="add" size={30} color={COLORS.textPrimary} />
                 </TouchableOpacity>
             )}
         </SafeAreaView>
@@ -119,85 +165,70 @@ const ShipList = ({ navigation, userRole }) => {
 
 export default ShipList;
 
+/*──────── Styles ────────*/
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#1c1c1e'
+    container: { flex: 1, backgroundColor: COLORS.bg },
+    center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+    searchBar: {
+        backgroundColor: COLORS.surface,
+        color: COLORS.textPrimary,
+        margin: 16,
+        borderRadius: 10,
+        paddingHorizontal: 16,
+        height: 44,
     },
-    header: {
-        padding: 20
-    },
-    headerTitle: {
-        fontSize: 24,
-        fontWeight: 'bold',
-        color: '#fff'
-    },
-    headerSubtitle: {
-        fontSize: 14,
-        color: '#aaa',
-        marginTop: 4
-    },
-    cardWrapper: {
-        marginHorizontal: 16,
-        marginBottom: 12
-    },
-    card: {
-        padding: 16,
-        borderRadius: 14,
-        backgroundColor: '#2a2a2d',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3
-    },
-    cardTitle: {
-        fontSize: 18,
-        fontWeight: '700',
-        marginBottom: 10,
-        color: '#fff'
-    },
-    infoRow: {
+    sectionHeader: {
         flexDirection: 'row',
-        marginBottom: 4
+        alignItems: 'center',
+        marginTop: 16,
+        marginBottom: 8,
     },
-    label: {
+    sectionTitle: {
+        fontSize: 16,
+        color: COLORS.textPrimary,
+        fontWeight: '700',
+    },
+    itemCard: {
+        backgroundColor: COLORS.surface,
+        padding: 18,
+        borderRadius: 14,
+        marginBottom: 12,
+        gap: 4,
+        shadowColor: '#000',
+        shadowOpacity: 0.25,
+        shadowRadius: 4,
+        shadowOffset: { width: 0, height: 2 },
+        elevation: 4,
+    },
+    itemHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        marginBottom: 6,
+    },
+    itemTitle: {
+        fontSize: 16,
+        color: COLORS.textPrimary,
         fontWeight: '600',
-        color: '#ccc',
-        width: 90
+        flexShrink: 1,
     },
-    value: {
-        color: '#eee',
-        flexShrink: 1
+    headerActions: {
+        flexDirection: 'row',
+        marginLeft: 'auto',
+        gap: 14,
     },
+    row: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    itemText: { color: COLORS.textSecondary, fontSize: 13 },
     fab: {
         position: 'absolute',
-        right: 20,
-        bottom: 20,
-        backgroundColor: '#4EDCC4',
+        right: 24,
+        bottom: 24,
+        backgroundColor: COLORS.accent,
         width: 60,
         height: 60,
         borderRadius: 30,
         justifyContent: 'center',
         alignItems: 'center',
-        elevation: 5,
-        shadowColor: '#000',
-        shadowOpacity: 0.2,
-        shadowOffset: { width: 0, height: 4 },
-        shadowRadius: 4
+        elevation: 6,
     },
-    loadingContainer: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        backgroundColor: '#1c1c1e'
-    },
-    emptyContainer: {
-        alignItems: 'center',
-        marginTop: 100
-    },
-    emptyText: {
-        color: '#777',
-        fontSize: 16
-    }
 });

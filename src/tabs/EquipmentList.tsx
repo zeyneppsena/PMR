@@ -1,4 +1,11 @@
-import React, { useEffect, useState } from 'react';
+
+import React, {
+    useEffect,
+    useState,
+    useMemo,
+    useCallback,
+    Fragment,
+} from 'react';
 import {
     View,
     Text,
@@ -7,31 +14,205 @@ import {
     Modal,
     Pressable,
     TextInput,
-    FlatList,
+    SectionList,
     Alert,
-    ActivityIndicator
+    ActivityIndicator,
+    ScrollView,
+    KeyboardAvoidingView,
+    Platform,
 } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker'; // ← emklediyseniz
 import { Ionicons } from '@expo/vector-icons';
 import {
     collection,
     onSnapshot,
     addDoc,
-    Timestamp,
+    updateDoc,
+    deleteDoc,
     doc,
-    updateDoc
+    Timestamp,
 } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
-import { Picker } from '@react-native-picker/picker';
 
+/*──────────────── Palette ────────────────*/
+const COLORS = {
+    bg: '#121212',
+    surface: '#1E1E1E',
+    border: '#313131',
+    accent: '#4ECDC4',
+    warn: '#e57373',
+    textPrimary: '#FFFFFF',
+    textSecondary: '#9E9E9E',
+    overlay: 'rgba(0,0,0,0.7)',
+    chipBg: '#263238',
+    chipSelected: '#37474F',
+};
+
+/*──────────────── Util: Input w/ icon ───*/
+const InputField = ({
+                        icon,
+                        placeholder,
+                        value,
+                        onChangeText,
+                        keyboardType = 'default',
+                    }: {
+    icon: React.ComponentProps<typeof Ionicons>['name'];
+    placeholder: string;
+    value: string;
+    onChangeText: (t: string) => void;
+    keyboardType?: 'default' | 'numeric' | 'email-address';
+}) => (
+    <View style={styles.inputField}>
+        <Ionicons name={icon} size={18} color={COLORS.textSecondary} />
+        <TextInput
+            style={styles.inputInner}
+            placeholder={placeholder}
+            placeholderTextColor={COLORS.textSecondary}
+            value={value}
+            onChangeText={onChangeText}
+            keyboardType={keyboardType}
+        />
+    </View>
+);
+
+const handleDelete = async (item: any) => {
+    Alert.alert('Silmek istediğine emin misin?', '', [
+        { text: 'İptal', style: 'cancel' },
+        {
+            text: 'Sil',
+            style: 'destructive',
+            onPress: async () => {
+                try {
+                    await deleteDoc(doc(db, 'equipments', item.id));
+                    Alert.alert('Başarılı', 'Ekipman silindi');
+                } catch (err) {
+                    console.error(err);
+                    Alert.alert('Hata', 'Silme sırasında sorun oluştu.');
+                }
+            },
+        },
+    ]);
+};
+
+
+/*──────────────── Util: ChipSelect ──────*/
+const ChipSelect = ({
+                        options,
+                        value,
+                        onChange,
+                    }: {
+    options: string[];
+    value: string;
+    onChange: (v: string) => void;
+}) => (
+    <View style={styles.chipRow}>
+        {options.map((opt) => {
+            const selected = opt === value;
+            return (
+                <TouchableOpacity
+                    key={opt}
+                    style={[
+                        styles.chip,
+                        { backgroundColor: selected ? COLORS.accent : COLORS.chipBg },
+                    ]}
+                    onPress={() => onChange(opt)}
+                >
+                    <Text
+                        style={{
+                            color: selected ? COLORS.bg : COLORS.textPrimary,
+                            fontWeight: '600',
+                        }}
+                    >
+                        {opt}
+                    </Text>
+                </TouchableOpacity>
+            );
+        })}
+    </View>
+);
+
+/*──────────────── Mini Dropdown (unchanged) ───────────*/
+const DropdownSelect = ({
+                            label,
+                            value,
+                            placeholder = '-- Seçiniz --',
+                            options = [],
+                            onChange,
+                        }: {
+    label: string;
+    value: string;
+    placeholder?: string;
+    options: { label: string; value: string }[];
+    onChange: (val: string) => void;
+}) => {
+    const [visible, setVisible] = useState(false);
+    const current = options.find((o) => o.value === value)?.label || placeholder;
+
+    return (
+        <View style={{ marginBottom: 16 }}>
+            <Text style={styles.label}>
+                {label} <Text style={{ color: COLORS.accent }}>✱</Text>
+            </Text>
+
+            <TouchableOpacity
+                style={styles.dropdownField}
+                activeOpacity={0.8}
+                onPress={() => setVisible(true)}
+            >
+                <Text
+                    style={{
+                        color: value ? COLORS.textPrimary : COLORS.textSecondary,
+                        flex: 1,
+                    }}
+                >
+                    {current}
+                </Text>
+                <Ionicons name="chevron-down" size={22} color={COLORS.textSecondary} />
+            </TouchableOpacity>
+
+            <Modal
+                visible={visible}
+                animationType="fade"
+                transparent
+                onRequestClose={() => setVisible(false)}
+            >
+                <Pressable style={styles.modalBG} onPress={() => setVisible(false)} />
+                <View style={styles.dropdownModalContainer}>
+                    <SectionList
+                        sections={[{ title: '', data: options }]}
+                        keyExtractor={(_, i) => i.toString()}
+                        renderItem={({ item }) => (
+                            <TouchableOpacity
+                                style={styles.dropdownItem}
+                                onPress={() => {
+                                    onChange(item.value);
+                                    setVisible(false);
+                                }}
+                            >
+                                <Text style={{ color: COLORS.textPrimary }}>{item.label}</Text>
+                            </TouchableOpacity>
+                        )}
+                    />
+                </View>
+            </Modal>
+        </View>
+    );
+};
+
+/*──────────────── Main ────────────────*/
 const EquipmentList = () => {
-    const [equipments, setEquipments] = useState([]);
-    const [ships, setShips] = useState([]);
-    const [users, setUsers] = useState([]);
+    const [equipments, setEquipments] = useState<any[]>([]);
+    const [ships, setShips] = useState<any[]>([]);
+    const [users, setUsers] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
 
-    const [modalVisible, setModalVisible] = useState(false);
-    const [updateModalVisible, setUpdateModalVisible] = useState(false);
+    /* form / modal state */
+    const [formVisible, setFormVisible] = useState(false);
+    const [updateHoursVisible, setUpdateHoursVisible] = useState(false);
+    const [isEditing, setIsEditing] = useState(false);
+    const [editingItemId, setEditingItemId] = useState<string | null>(null);
 
+    /* form fields */
     const [selectedShip, setSelectedShip] = useState('');
     const [type, setType] = useState('');
     const [brand, setBrand] = useState('');
@@ -40,51 +221,67 @@ const EquipmentList = () => {
     const [workingHours, setWorkingHours] = useState('');
     const [lastUpdated, setLastUpdated] = useState('');
     const [maintenanceType, setMaintenanceType] = useState('');
+    const [periodicDays, setPeriodicDays] = useState('');
+    const [maintenanceHour, setMaintenanceHour] = useState('');
 
-    const [selectedEquipment, setSelectedEquipment] = useState(null);
+    /* date‑time picker state */
+    const [showDatePicker, setShowDatePicker] = useState(false);
+    const [startDate, setStartDate] = useState('');
+    const [showStartDatePicker, setShowStartDatePicker] = useState(false);
+
+
+    /* hours‑update modal */
+    const [selectedEquipment, setSelectedEquipment] = useState<any>(null);
     const [newWorkingHours, setNewWorkingHours] = useState('');
 
+    /* constants */
+    const equipmentTypes = [
+        'Güverte Ekipmanları',
+        'Jeneratör',
+        'Havalandırma',
+        'Ana Makina',
+        'Diğer',
+        'İskele Ana Makina Sensör',
+        'Pompa',
+        'Sancak Ana Makina Sensör',
+        'Separatör',
+    ];
+    const maintenanceTypes = ['Periyodik', 'Saatlik', 'Her İkisi'];
+
+    /*──────── Firestore listeners ────────*/
     useEffect(() => {
-        const unsubEquipments = onSnapshot(collection(db, 'equipments'), (snapshot) => {
-            const data = snapshot.docs.map((doc) => ({
-                id: doc.id,
-                ...doc.data()
-            }));
-            setEquipments(data);
+        const unsub1 = onSnapshot(collection(db, 'equipments'), (snap) => {
+            setEquipments(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })));
             setLoading(false);
         });
-        return () => unsubEquipments();
+        const unsub2 = onSnapshot(collection(db, 'ships'), (snap) =>
+            setShips(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })))
+        );
+        const unsub3 = onSnapshot(collection(db, 'users'), (snap) =>
+            setUsers(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })))
+        );
+        return () => {
+            unsub1();
+            unsub2();
+            unsub3();
+        };
     }, []);
 
-    useEffect(() => {
-        const unsubShips = onSnapshot(collection(db, 'ships'), (snapshot) => {
-            const data = snapshot.docs.map((doc) => ({
-                id: doc.id,
-                ...doc.data()
-            }));
-            setShips(data);
+    /*──────── Memoised grouping ────────*/
+    const sections = useMemo(() => {
+        const grouped: { [ship: string]: any[] } = {};
+        equipments.forEach((eq) => {
+            if (!grouped[eq.ship]) grouped[eq.ship] = [];
+            grouped[eq.ship].push(eq);
         });
-        return () => unsubShips();
-    }, []);
+        return Object.keys(grouped).map((ship) => ({
+            title: ship,
+            data: grouped[ship].sort((a, b) => a.type.localeCompare(b.type)),
+        }));
+    }, [equipments]);
 
-    useEffect(() => {
-        const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
-            const data = snapshot.docs.map((doc) => ({
-                id: doc.id,
-                ...doc.data()
-            }));
-            setUsers(data);
-        });
-        return () => unsubUsers();
-    }, []);
-
-    const openModal = () => setModalVisible(true);
-    const closeModal = () => {
-        setModalVisible(false);
-        clearForm();
-    };
-
-    const clearForm = () => {
+    /*──────── Helpers ────────*/
+    const resetForm = () => {
         setSelectedShip('');
         setType('');
         setBrand('');
@@ -92,174 +289,435 @@ const EquipmentList = () => {
         setSelectedResponsible('');
         setWorkingHours('');
         setLastUpdated('');
+        setStartDate('');
         setMaintenanceType('');
+        setPeriodicDays('');
+        setIsEditing(false);
+        setEditingItemId(null);
     };
 
-    const handleAddEquipment = async () => {
-        if (!selectedShip || !type || !brand || !serialNo) {
+    const openCreate = () => {
+        resetForm();
+        setFormVisible(true);
+    };
+
+    const openEdit = (item: any) => {
+        setIsEditing(true);
+        setEditingItemId(item.id);
+        setSelectedShip(item.ship);
+        setType(item.type);
+        setBrand(item.brand);
+        setSerialNo(item.serialNo);
+        setSelectedResponsible(item.responsible);
+        setWorkingHours(String(item.workingHours ?? ''));
+        setLastUpdated(item.lastUpdated);
+        setMaintenanceType(item.maintenanceType);
+        setMaintenanceHour(item.maintenanceHour);
+        setPeriodicDays(item.periodicDays || '');
+        setStartDate(item.startDate || '');
+        setFormVisible(true);
+    };
+
+    /*──────── Save logic (unchanged) ────────*/
+    const handleSave = async () => {
+        if (!selectedShip || !type || !brand || !serialNo || !maintenanceType) {
             Alert.alert('Uyarı', 'Lütfen zorunlu alanları doldurun');
             return;
         }
         try {
-            await addDoc(collection(db, 'equipments'), {
-                ship: selectedShip,
-                type,
-                brand,
-                serialNo,
-                responsible: selectedResponsible,
-                workingHours,
-                lastUpdated: lastUpdated || new Date().toISOString().slice(0, 10),
-                maintenanceType,
-                createdAt: Timestamp.fromDate(new Date())
-            });
-            Alert.alert('Başarılı', 'Ekipman eklendi!');
-            closeModal();
-        } catch (error) {
-            console.error('Ekipman ekleme hatası:', error);
-            Alert.alert('Hata', 'Ekipman eklenirken bir sorun oluştu.');
+            if (isEditing && editingItemId) {
+                await updateDoc(doc(db, 'equipments', editingItemId), {
+                    ship: selectedShip,
+                    type,
+                    brand,
+                    serialNo,
+                    responsible: selectedResponsible,
+                    workingHours: Number(workingHours) || null,
+                    lastUpdated: lastUpdated || new Date().toISOString().slice(0, 10),
+                    startDate: startDate || new Date().toISOString().slice(0, 10),
+                    maintenanceHour: maintenanceType === 'Saatlik' || maintenanceType === 'Her İkisi' ? maintenanceHour : null,
+                    maintenanceType,
+                    periodicDays:
+                        maintenanceType === 'Periyodik' ? periodicDays : null,
+                });
+                Alert.alert('Başarılı', 'Ekipman güncellendi');
+            } else {
+                await addDoc(collection(db, 'equipments'), {
+                    ship: selectedShip,
+                    type,
+                    brand,
+                    serialNo,
+                    responsible: selectedResponsible,
+                    workingHours: Number(workingHours) || null,
+                    maintenanceHour: maintenanceType === 'Saatlik' || maintenanceType === 'Her İkisi' ? maintenanceHour : null,
+                    lastUpdated:
+                        lastUpdated || new Date().toISOString().slice(0, 10),
+                    maintenanceType,
+                    periodicDays:
+                        maintenanceType === 'Periyodik' ? periodicDays : null,
+                    createdAt: Timestamp.fromDate(new Date()),
+                });
+                Alert.alert('Başarılı', 'Ekipman eklendi');
+            }
+            setFormVisible(false);
+            resetForm();
+        } catch (err) {
+            console.error(err);
+            Alert.alert('Hata', 'İşlem sırasında sorun oluştu.');
         }
     };
 
-    const handleUpdateWorkingHours = async () => {
-        if (!newWorkingHours || isNaN(newWorkingHours)) {
-            Alert.alert('Uyarı', 'Geçerli bir sayı girin.');
-            return;
-        }
-        try {
-            const equipmentRef = doc(db, 'equipments', selectedEquipment.id);
-            await updateDoc(equipmentRef, {
-                workingHours: newWorkingHours,
-                lastUpdated: new Date().toISOString().slice(0, 10)
-            });
-            Alert.alert('Başarılı', 'Çalışma saati güncellendi.');
-            setUpdateModalVisible(false);
-            setSelectedEquipment(null);
-            setNewWorkingHours('');
-        } catch (error) {
-            console.error('Güncelleme hatası:', error);
-            Alert.alert('Hata', 'Güncelleme sırasında sorun oluştu.');
-        }
-    };
-
-    const renderItem = ({ item }) => (
+    /*──────── List item renderer (unchanged) ────────*/
+    const renderItem = ({ item }: { item: any }) => (
         <View style={styles.itemCard}>
-            <Text style={styles.itemTitle}>{item.brand} - {item.type}</Text>
-            <Text style={styles.itemText}>Gemi: {item.ship}</Text>
-            <Text style={styles.itemText}>Seri No: {item.serialNo}</Text>
-            <Text style={styles.itemText}>Sorumlu: {item.responsible || '-'}</Text>
-            <Text style={styles.itemText}>Çalışma Saati: {item.workingHours || '-'}</Text>
-            <Text style={styles.itemText}>Son Güncelleme: {item.lastUpdated}</Text>
-            <Text style={styles.itemText}>Bakım Tipi: {item.maintenanceType || '-'}</Text>
+            <View style={styles.itemHeader}>
+                <Ionicons name="boat-outline" size={20} color={COLORS.accent} />
+                <Text style={styles.itemTitle}>
+                    {item.ship} – {item.type}
+                </Text>
+                <View style={styles.headerActions}>
+                    <TouchableOpacity
+                        onPress={() => {
+                            setSelectedEquipment(item);
+                            setNewWorkingHours(String(item.workingHours ?? ''));
+                            setUpdateHoursVisible(true);
+                        }}
+                    >
+                        <Ionicons name="time-outline" size={18} color={COLORS.accent} />
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => openEdit(item)}>
+                        <Ionicons name="create-outline" size={18} color={COLORS.accent} />
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => handleDelete(item)}>
+                        <Ionicons name="trash-outline" size={18} color={COLORS.warn} />
+                    </TouchableOpacity>
+                </View>
+            </View>
 
-            <TouchableOpacity
-                style={{ marginTop: 6, alignSelf: 'flex-end' }}
-                onPress={() => {
-                    setSelectedEquipment(item);
-                    setNewWorkingHours(item.workingHours || '');
-                    setUpdateModalVisible(true);
-                }}
-            >
-                <Text style={{ color: '#4ECDC4', fontWeight: 'bold' }}>Çalışma Saatini Güncelle</Text>
-            </TouchableOpacity>
+            <View style={styles.row}>
+                <Ionicons name="time-outline" size={16} color={COLORS.accent} />
+                <Text style={styles.itemText}>{item.workingHours ?? '-'}</Text>
+            </View>
+            <View style={styles.row}>
+                <Ionicons name="calendar-outline" size={16} color={COLORS.accent} />
+                <Text style={styles.itemText}>{item.lastUpdated}</Text>
+            </View>
         </View>
     );
 
-    if (loading) {
-        return (
-            <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#4ECDC4" />
-            </View>
-        );
-    }
+    /*──────── Modal form UI – revamped ────────*/
+    const renderForm = () => (
+        <KeyboardAvoidingView
+            style={styles.modalOverlay}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+            <Pressable style={styles.modalBG} onPress={() => setFormVisible(false)} />
 
+            <ScrollView
+                style={styles.modalContainer}
+                contentContainerStyle={{ paddingBottom: 30 }}
+                showsVerticalScrollIndicator={false}
+            >
+                {/* Header */}
+                <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitle}>
+                        {isEditing ? 'Ekipmanı Düzenle' : 'Yeni Ekipman'}
+                    </Text>
+                    <TouchableOpacity onPress={() => setFormVisible(false)}>
+                        <Ionicons
+                            name="close"
+                            size={24}
+                            color={COLORS.textSecondary}
+                        />
+                    </TouchableOpacity>
+                </View>
+
+                {/* Fields */}
+                <DropdownSelect
+                    label="Gemi"
+                    value={selectedShip}
+                    onChange={setSelectedShip}
+                    options={ships.map((s: any) => ({
+                        label: s.name,
+                        value: s.name,
+                    }))}
+                />
+
+                <DropdownSelect
+                    label="Ekipman Türü"
+                    value={type}
+                    onChange={setType}
+                    options={equipmentTypes.map((t) => ({
+                        label: t,
+                        value: t,
+                    }))}
+                />
+
+                <InputField
+                    icon="pricetag-outline"
+                    placeholder="Marka"
+                    value={brand}
+                    onChangeText={setBrand}
+                />
+                <InputField
+                    icon="barcode-outline"
+                    placeholder="Seri No"
+                    value={serialNo}
+                    onChangeText={setSerialNo}
+                />
+
+                {/* Start Date – date picker */}
+                <TouchableOpacity onPress={() => setShowStartDatePicker(true)}>
+                    <InputField
+                        icon="calendar-outline"
+                        placeholder="Başlangıç Tarihi"
+                        value={startDate}
+                        onChangeText={setStartDate}
+                    />
+                </TouchableOpacity>
+
+                {showStartDatePicker && (
+                    <DateTimePicker
+                        value={startDate ? new Date(startDate) : new Date()}
+                        mode="date"
+                        display={Platform.OS === 'ios' ? 'inline' : 'default'}
+                        maximumDate={new Date()}
+                        onChange={(e, date) => {
+                            setShowStartDatePicker(false);
+                            if (date) {
+                                setStartDate(date.toISOString().slice(0, 10));
+                            }
+                        }}
+                    />
+                )}
+
+
+                <DropdownSelect
+                    label="Sorumlu"
+                    value={selectedResponsible}
+                    onChange={setSelectedResponsible}
+                    options={users.map((u: any) => ({
+                        label: u.name || u.email,
+                        value: u.name || u.email,
+                    }))}
+                />
+
+                <InputField
+                    icon="time-outline"
+                    placeholder="Çalışma Saati"
+                    value={workingHours}
+                    onChangeText={setWorkingHours}
+                    keyboardType="numeric"
+                />
+
+                {/* Last updated – date picker */}
+                <TouchableOpacity
+                    onPress={() => {
+                        Platform.OS === 'android'
+                            ? setShowDatePicker(true)
+                            : setShowDatePicker(true);
+                    }}
+                >
+                    <InputField
+                        icon="calendar-outline"
+                        placeholder="Son Güncellenme"
+                        value={lastUpdated}
+                        onChangeText={setLastUpdated}
+                    />
+                </TouchableOpacity>
+
+                {showDatePicker && (
+                    <DateTimePicker
+                        value={
+                            lastUpdated
+                                ? new Date(lastUpdated)
+                                : new Date()
+                        }
+                        mode="date"
+                        display={Platform.OS === 'ios' ? 'inline' : 'default'}
+                        maximumDate={new Date()}
+                        onChange={(e, date) => {
+                            setShowDatePicker(false);
+                            if (date) {
+                                setLastUpdated(date.toISOString().slice(0, 10));
+                            }
+                        }}
+                    />
+                )}
+
+                {/* Maintenance type chips */}
+                <Text style={[styles.label, { marginTop: 12 }]}>
+                    Bakım Türü <Text style={{ color: COLORS.accent }}>✱</Text>
+                </Text>
+                <ChipSelect
+                    options={maintenanceTypes}
+                    value={maintenanceType}
+                    onChange={setMaintenanceType}
+                />
+
+                {['Periyodik', 'Her İkisi'].includes(maintenanceType) && (
+                    <InputField
+                        icon="repeat-outline"
+                        placeholder="Periyodik Bakım (gün)"
+                        value={periodicDays}
+                        onChangeText={setPeriodicDays}
+                        keyboardType="numeric"
+                    />
+                )}
+                {['Saatlik', 'Her İkisi'].includes(maintenanceType) && (
+                    <InputField
+                        icon="repeat-outline"
+                        placeholder="Bakım Saat"
+                        value={maintenanceHour}
+                        onChangeText={setMaintenanceHour}
+                        keyboardType="numeric"
+                    />
+                )}
+
+
+                {/* Buttons */}
+                <View style={styles.rowBetween}>
+                    <TouchableOpacity style={styles.btnSave} onPress={handleSave}>
+                        <Text style={styles.btnText}>
+                            {isEditing ? 'Güncelle' : 'Kaydet'}
+                        </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={styles.btnCancel}
+                        onPress={() => {
+                            resetForm();
+                            setFormVisible(false);
+                        }}
+                    >
+                        <Text style={styles.btnText}>Vazgeç</Text>
+                    </TouchableOpacity>
+                </View>
+            </ScrollView>
+        </KeyboardAvoidingView>
+    );
+
+    /*──────── JSX ────────*/
     return (
         <View style={styles.container}>
-            <FlatList
-                data={equipments}
-                keyExtractor={(item) => item.id}
-                renderItem={renderItem}
-                contentContainerStyle={{ paddingBottom: 80, padding: 16 }}
-                ListEmptyComponent={
-                    <View style={styles.emptyContainer}>
-                        <Text style={styles.emptyText}>Henüz bir ekipman eklenmemiş.</Text>
-                    </View>
-                }
-            />
+            {loading ? (
+                <View style={styles.center}>
+                    <ActivityIndicator size="large" color={COLORS.accent} />
+                </View>
+            ) : (
+                <SectionList
+                    sections={sections}
+                    keyExtractor={(item) => item.id}
+                    renderItem={renderItem}
+                    contentContainerStyle={{ padding: 16 }}
+                    stickySectionHeadersEnabled={false}
+                    renderSectionHeader={({ section: { title } }) => (
+                        <View style={styles.sectionHeader}>
+                            <Ionicons
+                                name="boat"
+                                size={18}
+                                color={COLORS.accent}
+                                style={{ marginRight: 6 }}
+                            />
+                            <Text style={styles.sectionTitle}>{title}</Text>
+                        </View>
+                    )}
+                    ListEmptyComponent={() => (
+                        <View style={styles.center}>
+                            <Text style={{ color: COLORS.textSecondary }}>
+                                Henüz bir ekipman eklenmemiş.
+                            </Text>
+                        </View>
+                    )}
+                />
+            )}
 
-            <TouchableOpacity style={styles.fab} onPress={openModal}>
-                <Ionicons name="add" size={32} color="white" />
+            {/* FAB */}
+            <TouchableOpacity
+                style={styles.fab}
+                onPress={openCreate}
+                activeOpacity={0.9}
+            >
+                <Ionicons name="add" size={30} color={COLORS.textPrimary} />
             </TouchableOpacity>
 
-            {/* Yeni Ekipman Modal */}
-            <Modal visible={modalVisible} transparent animationType="slide" onRequestClose={closeModal}>
-                <View style={styles.modalOverlay}>
-                    <Pressable style={styles.modalBG} onPress={closeModal} />
-                    <View style={styles.modalContainer}>
-                        <Text style={styles.modalTitle}>Yeni Ekipman Ekle</Text>
-
-                        <Text style={styles.label}>Gemi (Zorunlu):</Text>
-                        <View style={styles.pickerWrapper}>
-                            <Picker selectedValue={selectedShip} onValueChange={setSelectedShip} style={styles.picker}>
-                                <Picker.Item label="-- Gemi Seç --" value="" />
-                                {ships.map((ship) => (
-                                    <Picker.Item key={ship.id} label={ship.name} value={ship.name} />
-                                ))}
-                            </Picker>
-                        </View>
-
-                        <TextInput style={styles.input} placeholder="Tür - Zorunlu" value={type} onChangeText={setType} placeholderTextColor="#888" />
-                        <TextInput style={styles.input} placeholder="Marka - Zorunlu" value={brand} onChangeText={setBrand} placeholderTextColor="#888" />
-                        <TextInput style={styles.input} placeholder="Seri No - Zorunlu" value={serialNo} onChangeText={setSerialNo} placeholderTextColor="#888" />
-
-                        <Text style={styles.label}>Sorumlu:</Text>
-                        <View style={styles.pickerWrapper}>
-                            <Picker selectedValue={selectedResponsible} onValueChange={setSelectedResponsible} style={styles.picker}>
-                                <Picker.Item label="-- Sorumlu Seç --" value="" />
-                                {users.map((user) => (
-                                    <Picker.Item key={user.id} label={user.name || user.email} value={user.name || user.email} />
-                                ))}
-                            </Picker>
-                        </View>
-
-                        <TextInput style={styles.input} placeholder="Çalışma Saati" value={workingHours} onChangeText={setWorkingHours} keyboardType="numeric" placeholderTextColor="#888" />
-                        <TextInput style={styles.input} placeholder="Son Güncellenme (yyyy-mm-dd)" value={lastUpdated} onChangeText={setLastUpdated} placeholderTextColor="#888" />
-                        <TextInput style={styles.input} placeholder="Bakım Tipi" value={maintenanceType} onChangeText={setMaintenanceType} placeholderTextColor="#888" />
-
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                            <TouchableOpacity style={styles.btnSave} onPress={handleAddEquipment}>
-                                <Text style={styles.btnText}>Kaydet</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={styles.btnCancel} onPress={closeModal}>
-                                <Text style={styles.btnText}>Vazgeç</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </View>
+            {/* Add/Edit Modal */}
+            <Modal
+                visible={formVisible}
+                animationType="slide"
+                transparent
+                onRequestClose={() => setFormVisible(false)}
+            >
+                {renderForm()}
             </Modal>
 
-            {/* Çalışma Saati Güncelleme Modal */}
-            <Modal visible={updateModalVisible} transparent animationType="fade" onRequestClose={() => setUpdateModalVisible(false)}>
-                <View style={styles.modalOverlay}>
-                    <Pressable style={styles.modalBG} onPress={() => setUpdateModalVisible(false)} />
-                    <View style={styles.modalContainer}>
+            {/*──────── Hours Update Modal (unchanged) ────────*/}
+            <Modal
+                visible={updateHoursVisible}
+                animationType="fade"
+                transparent
+                onRequestClose={() => setUpdateHoursVisible(false)}
+            >
+                <Pressable
+                    style={styles.modalBG}
+                    onPress={() => setUpdateHoursVisible(false)}
+                />
+                <View style={styles.modalContainer}>
+                    <View style={styles.modalHeader}>
                         <Text style={styles.modalTitle}>Çalışma Saati Güncelle</Text>
-                        <Text style={styles.label}>Yeni Çalışma Saati:</Text>
-                        <TextInput
-                            style={styles.input}
-                            value={newWorkingHours}
-                            onChangeText={setNewWorkingHours}
-                            keyboardType="numeric"
-                            placeholder="örn. 1200"
-                            placeholderTextColor="#888"
-                        />
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                            <TouchableOpacity style={styles.btnSave} onPress={handleUpdateWorkingHours}>
-                                <Text style={styles.btnText}>Güncelle</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={styles.btnCancel} onPress={() => setUpdateModalVisible(false)}>
-                                <Text style={styles.btnText}>İptal</Text>
-                            </TouchableOpacity>
-                        </View>
+                        <TouchableOpacity onPress={() => setUpdateHoursVisible(false)}>
+                            <Ionicons name="close" size={24} color={COLORS.textSecondary} />
+                        </TouchableOpacity>
+                    </View>
+
+                    <Text style={styles.label}>Yeni Çalışma Saati:</Text>
+                    <InputField
+                        icon="time-outline"
+                        placeholder="örn. 1200"
+                        value={newWorkingHours}
+                        onChangeText={setNewWorkingHours}
+                        keyboardType="numeric"
+                    />
+
+                    <View style={styles.rowBetween}>
+                        <TouchableOpacity
+                            style={styles.btnSave}
+                            onPress={async () => {
+                                if (
+                                    !newWorkingHours ||
+                                    isNaN(Number(newWorkingHours))
+                                ) {
+                                    Alert.alert('Uyarı', 'Geçerli bir sayı girin.');
+                                    return;
+                                }
+                                try {
+                                    await updateDoc(
+                                        doc(db, 'equipments', selectedEquipment.id),
+                                        {
+                                            workingHours: Number(newWorkingHours),
+                                            lastUpdated: new Date()
+                                                .toISOString()
+                                                .slice(0, 10),
+                                        }
+                                    );
+                                    Alert.alert(
+                                        'Başarılı',
+                                        'Çalışma saati güncellendi.'
+                                    );
+                                    setUpdateHoursVisible(false);
+                                } catch (err) {
+                                    console.error(err);
+                                    Alert.alert('Hata', 'Güncelleme sırasında sorun oluştu.');
+                                }
+                            }}
+                        >
+                            <Text style={styles.btnText}>Güncelle</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={styles.btnCancel}
+                            onPress={() => setUpdateHoursVisible(false)}
+                        >
+                            <Text style={styles.btnText}>İptal</Text>
+                        </TouchableOpacity>
                     </View>
                 </View>
             </Modal>
@@ -269,116 +727,169 @@ const EquipmentList = () => {
 
 export default EquipmentList;
 
+/*──────────────── Styles ────────────────*/
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#1c1c1e'
-    },
-    loadingContainer: {
-        flex: 1,
-        justifyContent: 'center',
+    container: { flex: 1, backgroundColor: COLORS.bg },
+    center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+
+    /* list */
+    sectionHeader: {
+        flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#1c1c1e'
+        marginBottom: 8,
+        marginTop: 16,
     },
-    emptyContainer: {
-        marginTop: 100,
-        alignItems: 'center'
-    },
-    emptyText: {
-        color: '#aaa',
-        fontSize: 16
+    sectionTitle: {
+        fontSize: 18,
+        color: COLORS.textPrimary,
+        fontWeight: '700',
     },
     itemCard: {
-        backgroundColor: '#2c2c2e',
-        padding: 16,
-        borderRadius: 10,
-        marginBottom: 12
+        backgroundColor: COLORS.surface,
+        padding: 18,
+        borderRadius: 14,
+        marginBottom: 12,
+        gap: 4,
+        shadowColor: '#000',
+        shadowOpacity: 0.25,
+        shadowRadius: 4,
+        shadowOffset: { width: 0, height: 2 },
+        elevation: 4,
+    },
+    itemHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        marginBottom: 6,
+    },
+    headerActions: {
+        flexDirection: 'row',
+        marginLeft: 'auto',
+        gap: 14,
     },
     itemTitle: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        color: '#fff',
-        marginBottom: 6
+        fontSize: 16,
+        color: COLORS.textPrimary,
+        fontWeight: '600',
+        flexShrink: 1,
     },
-    itemText: {
-        color: '#ccc',
-        marginBottom: 2
+    row: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    rowBetween: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginTop: 16,
     },
+    itemText: { color: COLORS.textSecondary, fontSize: 13 },
+
+    /* fab */
     fab: {
         position: 'absolute',
-        right: 20,
-        bottom: 20,
-        backgroundColor: '#4ECDC4',
+        right: 24,
+        bottom: 24,
+        backgroundColor: COLORS.accent,
         width: 60,
         height: 60,
         borderRadius: 30,
         justifyContent: 'center',
         alignItems: 'center',
-        elevation: 5
+        elevation: 6,
     },
-    modalOverlay: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center'
-    },
-    modalBG: {
-        ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(0,0,0,0.6)'
-    },
+
+    /* modal (shared) */
+    modalOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+    modalBG: { ...StyleSheet.absoluteFillObject, backgroundColor: COLORS.overlay },
     modalContainer: {
-        width: '85%',
-        backgroundColor: '#2c2c2e',
-        borderRadius: 10,
-        padding: 16
+        width: '93%',
+        backgroundColor: COLORS.surface,
+        borderRadius: 16,
+        padding: 20,
+        maxHeight: '92%',
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 20,
     },
     modalTitle: {
         fontSize: 20,
-        fontWeight: 'bold',
-        color: '#fff',
-        marginBottom: 10,
-        alignSelf: 'center'
+        color: COLORS.textPrimary,
+        fontWeight: '700',
     },
-    label: {
-        color: '#ccc',
-        marginTop: 6,
-        marginBottom: 2
-    },
-    pickerWrapper: {
+
+    /* dropdown */
+    dropdownField: {
+        flexDirection: 'row',
+        alignItems: 'center',
         borderWidth: 1,
-        borderColor: '#3a3a3c',
-        backgroundColor: '#1c1c1e',
-        borderRadius: 6,
-        marginBottom: 8
+        borderColor: COLORS.border,
+        backgroundColor: COLORS.bg,
+        borderRadius: 10,
+        paddingVertical: 13,
+        paddingHorizontal: 14,
     },
-    picker: {
-        color: '#fff',
-        width: '100%'
+    dropdownModalContainer: {
+        alignSelf: 'center',
+        width: '85%',
+        maxHeight: '80%',
+        backgroundColor: COLORS.surface,
+        borderRadius: 12,
+        paddingVertical: 12,
+        marginTop: '30%',
     },
-    input: {
+    dropdownItem: {
+        paddingVertical: 12,
+        paddingHorizontal: 18,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: COLORS.border,
+    },
+
+    /* inputs */
+    label: { color: COLORS.textSecondary, marginBottom: 6, fontSize: 14 },
+    inputField: {
+        flexDirection: 'row',
+        alignItems: 'center',
         borderWidth: 1,
-        borderColor: '#3a3a3c',
-        backgroundColor: '#1c1c1e',
-        color: '#fff',
-        borderRadius: 6,
-        padding: 10,
-        marginBottom: 8
+        borderColor: COLORS.border,
+        backgroundColor: COLORS.bg,
+        borderRadius: 10,
+        paddingVertical: 12,
+        paddingHorizontal: 14,
+        marginBottom: 14,
     },
+    inputInner: {
+        flex: 1,
+        color: COLORS.textPrimary,
+        marginLeft: 10,
+        fontSize: 14,
+    },
+
+    /* chips */
+    chipRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 10,
+        marginBottom: 14,
+    },
+    chip: {
+        paddingVertical: 8,
+        paddingHorizontal: 14,
+        borderRadius: 20,
+    },
+
+    /* buttons */
     btnSave: {
-        backgroundColor: '#4ECDC4',
-        borderRadius: 6,
-        paddingVertical: 10,
-        paddingHorizontal: 20,
-        marginTop: 8
+        backgroundColor: COLORS.accent,
+        borderRadius: 10,
+        paddingVertical: 13,
+        paddingHorizontal: 30,
     },
     btnCancel: {
-        backgroundColor: '#666',
-        borderRadius: 6,
-        paddingVertical: 10,
-        paddingHorizontal: 20,
-        marginTop: 8
+        backgroundColor: '#444',
+        borderRadius: 10,
+        paddingVertical: 13,
+        paddingHorizontal: 30,
     },
-    btnText: {
-        color: '#fff',
-        fontWeight: 'bold'
-    }
+    btnText: { color: COLORS.textPrimary, fontWeight: '600', fontSize: 16 },
 });
