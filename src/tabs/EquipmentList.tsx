@@ -1,4 +1,3 @@
-
 import React, {
     useEffect,
     useState,
@@ -21,7 +20,7 @@ import {
     KeyboardAvoidingView,
     Platform,
 } from 'react-native';
-import DateTimePicker from '@react-native-community/datetimepicker'; // ← emklediyseniz
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
 import {
     collection,
@@ -31,8 +30,12 @@ import {
     deleteDoc,
     doc,
     Timestamp,
+    query,
+    where,
 } from 'firebase/firestore';
-import { db } from '../../firebaseConfig';
+import { onAuthStateChanged } from 'firebase/auth';
+import { db, auth } from '../../firebaseConfig';
+import { useUser } from '../UserContext';
 
 /*──────────────── Palette ────────────────*/
 const COLORS = {
@@ -55,13 +58,7 @@ const InputField = ({
                         value,
                         onChangeText,
                         keyboardType = 'default',
-                    }: {
-    icon: React.ComponentProps<typeof Ionicons>['name'];
-    placeholder: string;
-    value: string;
-    onChangeText: (t: string) => void;
-    keyboardType?: 'default' | 'numeric' | 'email-address';
-}) => (
+                    }) => (
     <View style={styles.inputField}>
         <Ionicons name={icon} size={18} color={COLORS.textSecondary} />
         <TextInput
@@ -70,41 +67,12 @@ const InputField = ({
             placeholderTextColor={COLORS.textSecondary}
             value={value}
             onChangeText={onChangeText}
-            keyboardType={keyboardType}
         />
     </View>
 );
 
-const handleDelete = async (item: any) => {
-    Alert.alert('Silmek istediğine emin misin?', '', [
-        { text: 'İptal', style: 'cancel' },
-        {
-            text: 'Sil',
-            style: 'destructive',
-            onPress: async () => {
-                try {
-                    await deleteDoc(doc(db, 'equipments', item.id));
-                    Alert.alert('Başarılı', 'Ekipman silindi');
-                } catch (err) {
-                    console.error(err);
-                    Alert.alert('Hata', 'Silme sırasında sorun oluştu.');
-                }
-            },
-        },
-    ]);
-};
-
-
 /*──────────────── Util: ChipSelect ──────*/
-const ChipSelect = ({
-                        options,
-                        value,
-                        onChange,
-                    }: {
-    options: string[];
-    value: string;
-    onChange: (v: string) => void;
-}) => (
+const ChipSelect = ({ options, value, onChange }) => (
     <View style={styles.chipRow}>
         {options.map((opt) => {
             const selected = opt === value;
@@ -131,22 +99,17 @@ const ChipSelect = ({
     </View>
 );
 
-/*──────────────── Mini Dropdown (unchanged) ───────────*/
+/*──────────────── Mini Dropdown ─────────*/
 const DropdownSelect = ({
                             label,
                             value,
                             placeholder = '-- Seçiniz --',
                             options = [],
                             onChange,
-                        }: {
-    label: string;
-    value: string;
-    placeholder?: string;
-    options: { label: string; value: string }[];
-    onChange: (val: string) => void;
-}) => {
+                        }) => {
     const [visible, setVisible] = useState(false);
-    const current = options.find((o) => o.value === value)?.label || placeholder;
+    const current =
+        options.find((o) => o.value === value)?.label || placeholder;
 
     return (
         <View style={{ marginBottom: 16 }}>
@@ -199,21 +162,43 @@ const DropdownSelect = ({
     );
 };
 
+/*──────────────── Delete helper ─────────*/
+const handleDelete = async (item) => {
+    Alert.alert('Silmek istediğine emin misin?', '', [
+        { text: 'İptal', style: 'cancel' },
+        {
+            text: 'Sil',
+            style: 'destructive',
+            onPress: async () => {
+                try {
+                    await deleteDoc(doc(db, 'equipments', item.id));
+                    Alert.alert('Başarılı', 'Ekipman silindi');
+                } catch (err) {
+                    console.error(err);
+                    Alert.alert('Hata', 'Silme sırasında sorun oluştu.');
+                }
+            },
+        },
+    ]);
+};
+
 /*──────────────── Main ────────────────*/
 const EquipmentList = () => {
-    const [equipments, setEquipments] = useState<any[]>([]);
-    const [ships, setShips] = useState<any[]>([]);
-    const [users, setUsers] = useState<any[]>([]);
+    const { user } = useUser(); // UserContext'ten kullanıcı bilgisi
+    const [equipments, setEquipments] = useState([]);
+    const [ships, setShips] = useState([]);
+    const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(true);
 
     /* form / modal state */
     const [formVisible, setFormVisible] = useState(false);
     const [updateHoursVisible, setUpdateHoursVisible] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
-    const [editingItemId, setEditingItemId] = useState<string | null>(null);
+    const [editingItemId, setEditingItemId] = useState(null);
 
     /* form fields */
-    const [selectedShip, setSelectedShip] = useState('');
+    const [selectedShipId, setSelectedShipId] = useState('');
+    const [selectedShipName, setSelectedShipName] = useState('');
     const [type, setType] = useState('');
     const [brand, setBrand] = useState('');
     const [serialNo, setSerialNo] = useState('');
@@ -223,15 +208,14 @@ const EquipmentList = () => {
     const [maintenanceType, setMaintenanceType] = useState('');
     const [periodicDays, setPeriodicDays] = useState('');
     const [maintenanceHour, setMaintenanceHour] = useState('');
-
-    /* date‑time picker state */
-    const [showDatePicker, setShowDatePicker] = useState(false);
     const [startDate, setStartDate] = useState('');
+
+    /* datetime pickers */
+    const [showDatePicker, setShowDatePicker] = useState(false);
     const [showStartDatePicker, setShowStartDatePicker] = useState(false);
 
-
-    /* hours‑update modal */
-    const [selectedEquipment, setSelectedEquipment] = useState<any>(null);
+    /* hours-update modal */
+    const [selectedEquipment, setSelectedEquipment] = useState(null);
     const [newWorkingHours, setNewWorkingHours] = useState('');
 
     /* constants */
@@ -248,28 +232,75 @@ const EquipmentList = () => {
     ];
     const maintenanceTypes = ['Periyodik', 'Saatlik', 'Her İkisi'];
 
+    /*──────── Permission helpers ────────*/
+    const isAdmin = user?.role === 'main-admin';
+    const isShipAdmin = user?.role === 'ship-admin';
+    const isCrewMember = user?.role === 'gemi-personeli';
+
     /*──────── Firestore listeners ────────*/
     useEffect(() => {
-        const unsub1 = onSnapshot(collection(db, 'equipments'), (snap) => {
-            setEquipments(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })));
-            setLoading(false);
-        });
-        const unsub2 = onSnapshot(collection(db, 'ships'), (snap) =>
-            setShips(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })))
-        );
-        const unsub3 = onSnapshot(collection(db, 'users'), (snap) =>
-            setUsers(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })))
-        );
-        return () => {
-            unsub1();
-            unsub2();
-            unsub3();
-        };
-    }, []);
+        let unsubEquip;
 
-    /*──────── Memoised grouping ────────*/
+        // Rol bazlı ekipman sorgulama
+        if (isAdmin) {
+            // Admin tüm ekipmanları görür
+            unsubEquip = onSnapshot(collection(db, 'equipments'), (snap) => {
+                setEquipments(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+                setLoading(false);
+            });
+        } else if (isShipAdmin && user?.shipId) {
+            // Ship admin kendi gemisindeki tüm ekipmanları görür
+            const q = query(collection(db, 'equipments'), where('shipId', '==', user.shipId));
+            unsubEquip = onSnapshot(q, (snap) => {
+                setEquipments(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+                setLoading(false);
+            });
+        } else if (isCrewMember) {
+            // Gemi personeli sadece sorumlu olduğu ekipmanları görür
+            const q = query(
+                collection(db, 'equipments'),
+                where('responsible', 'in', [user?.email, user?.userName, user?.name])
+            );
+            unsubEquip = onSnapshot(q, (snap) => {
+                setEquipments(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+                setLoading(false);
+            });
+        } else {
+            setEquipments([]);
+            setLoading(false);
+        }
+
+        const unsubShips = onSnapshot(collection(db, 'ships'), (snap) =>
+            setShips(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+        );
+        const unsubUsers = onSnapshot(collection(db, 'users'), (snap) =>
+            setUsers(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+        );
+
+        return () => {
+            if (unsubEquip) unsubEquip();
+            unsubShips();
+            unsubUsers();
+        };
+    }, [user?.role, user?.shipId, user?.email, user?.userName]);
+
+    /*──────── Can user edit/delete ────────*/
+    const canEdit = useCallback(
+        (eq) => {
+            if (isAdmin) return true;
+            if (isShipAdmin && eq.shipId === user?.shipId) return true;
+            return (
+                eq.responsible === user?.email ||
+                eq.responsible === user?.userName ||
+                eq.responsible === user?.name
+            );
+        },
+        [isAdmin, isShipAdmin, user]
+    );
+
+    /*──────── Grouped sections ────────*/
     const sections = useMemo(() => {
-        const grouped: { [ship: string]: any[] } = {};
+        const grouped = {};
         equipments.forEach((eq) => {
             if (!grouped[eq.ship]) grouped[eq.ship] = [];
             grouped[eq.ship].push(eq);
@@ -280,9 +311,10 @@ const EquipmentList = () => {
         }));
     }, [equipments]);
 
-    /*──────── Helpers ────────*/
+    /*──────── Form helpers ────────*/
     const resetForm = () => {
-        setSelectedShip('');
+        setSelectedShipId('');
+        setSelectedShipName('');
         setType('');
         setBrand('');
         setSerialNo('');
@@ -292,19 +324,29 @@ const EquipmentList = () => {
         setStartDate('');
         setMaintenanceType('');
         setPeriodicDays('');
+        setMaintenanceHour('');
         setIsEditing(false);
         setEditingItemId(null);
     };
 
     const openCreate = () => {
         resetForm();
+        // Ship admin ise otomatik olarak kendi gemisini seç
+        if (isShipAdmin && user?.shipId) {
+            const userShip = ships.find(s => s.id === user.shipId);
+            if (userShip) {
+                setSelectedShipId(user.shipId);
+                setSelectedShipName(userShip.name);
+            }
+        }
         setFormVisible(true);
     };
 
-    const openEdit = (item: any) => {
+    const openEdit = (item) => {
         setIsEditing(true);
         setEditingItemId(item.id);
-        setSelectedShip(item.ship);
+        setSelectedShipId(item.shipId);
+        setSelectedShipName(item.ship);
         setType(item.type);
         setBrand(item.brand);
         setSerialNo(item.serialNo);
@@ -318,43 +360,45 @@ const EquipmentList = () => {
         setFormVisible(true);
     };
 
-    /*──────── Save logic (unchanged) ────────*/
+    /*──────── Save logic ────────*/
     const handleSave = async () => {
-        if (!selectedShip || !type || !brand || !serialNo || !maintenanceType) {
+        if (
+            !selectedShipId ||
+            !type ||
+            !brand ||
+            !serialNo ||
+            !maintenanceType
+        ) {
             Alert.alert('Uyarı', 'Lütfen zorunlu alanları doldurun');
             return;
         }
+
+        const payload = {
+            shipId: selectedShipId,
+            ship: selectedShipName,
+            type,
+            brand,
+            serialNo,
+            responsible: selectedResponsible,
+            workingHours: Number(workingHours) || null,
+            maintenanceHour:
+                ['Saatlik', 'Her İkisi'].includes(maintenanceType)
+                    ? maintenanceHour
+                    : null,
+            lastUpdated: lastUpdated || new Date().toISOString().slice(0, 10),
+            startDate: startDate || new Date().toISOString().slice(0, 10),
+            maintenanceType,
+            periodicDays:
+                maintenanceType === 'Periyodik' ? periodicDays : null,
+        };
+
         try {
             if (isEditing && editingItemId) {
-                await updateDoc(doc(db, 'equipments', editingItemId), {
-                    ship: selectedShip,
-                    type,
-                    brand,
-                    serialNo,
-                    responsible: selectedResponsible,
-                    workingHours: Number(workingHours) || null,
-                    lastUpdated: lastUpdated || new Date().toISOString().slice(0, 10),
-                    startDate: startDate || new Date().toISOString().slice(0, 10),
-                    maintenanceHour: maintenanceType === 'Saatlik' || maintenanceType === 'Her İkisi' ? maintenanceHour : null,
-                    maintenanceType,
-                    periodicDays:
-                        maintenanceType === 'Periyodik' ? periodicDays : null,
-                });
+                await updateDoc(doc(db, 'equipments', editingItemId), payload);
                 Alert.alert('Başarılı', 'Ekipman güncellendi');
             } else {
                 await addDoc(collection(db, 'equipments'), {
-                    ship: selectedShip,
-                    type,
-                    brand,
-                    serialNo,
-                    responsible: selectedResponsible,
-                    workingHours: Number(workingHours) || null,
-                    maintenanceHour: maintenanceType === 'Saatlik' || maintenanceType === 'Her İkisi' ? maintenanceHour : null,
-                    lastUpdated:
-                        lastUpdated || new Date().toISOString().slice(0, 10),
-                    maintenanceType,
-                    periodicDays:
-                        maintenanceType === 'Periyodik' ? periodicDays : null,
+                    ...payload,
                     createdAt: Timestamp.fromDate(new Date()),
                 });
                 Alert.alert('Başarılı', 'Ekipman eklendi');
@@ -367,236 +411,252 @@ const EquipmentList = () => {
         }
     };
 
-    /*──────── List item renderer (unchanged) ────────*/
-    const renderItem = ({ item }: { item: any }) => (
+    /*──────── List item renderer ────────*/
+    const renderItem = ({ item }) => (
         <View style={styles.itemCard}>
             <View style={styles.itemHeader}>
                 <Ionicons name="boat-outline" size={20} color={COLORS.accent} />
                 <Text style={styles.itemTitle}>
                     {item.ship} – {item.type}
                 </Text>
-                <View style={styles.headerActions}>
-                    <TouchableOpacity
-                        onPress={() => {
-                            setSelectedEquipment(item);
-                            setNewWorkingHours(String(item.workingHours ?? ''));
-                            setUpdateHoursVisible(true);
-                        }}
-                    >
-                        <Ionicons name="time-outline" size={18} color={COLORS.accent} />
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => openEdit(item)}>
-                        <Ionicons name="create-outline" size={18} color={COLORS.accent} />
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => handleDelete(item)}>
-                        <Ionicons name="trash-outline" size={18} color={COLORS.warn} />
-                    </TouchableOpacity>
-                </View>
+
+                {canEdit(item) && (
+                    <View style={styles.headerActions}>
+                        <TouchableOpacity
+                            onPress={() => {
+                                setSelectedEquipment(item);
+                                setNewWorkingHours(String(item.workingHours ?? ''));
+                                setUpdateHoursVisible(true);
+                            }}
+                        >
+                            <Ionicons name="time-outline" size={18} color={COLORS.accent} />
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => openEdit(item)}>
+                            <Ionicons name="create-outline" size={18} color={COLORS.accent} />
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => handleDelete(item)}>
+                            <Ionicons name="trash-outline" size={18} color={COLORS.warn} />
+                        </TouchableOpacity>
+                    </View>
+                )}
             </View>
 
             <View style={styles.row}>
                 <Ionicons name="time-outline" size={16} color={COLORS.accent} />
-                <Text style={styles.itemText}>{item.workingHours ?? '-'}</Text>
+                <Text style={styles.itemText}>{item.workingHours ?? '-'} saat</Text>
             </View>
             <View style={styles.row}>
                 <Ionicons name="calendar-outline" size={16} color={COLORS.accent} />
                 <Text style={styles.itemText}>{item.lastUpdated}</Text>
             </View>
+            {item.responsible && (
+                <View style={styles.row}>
+                    <Ionicons name="person-outline" size={16} color={COLORS.accent} />
+                    <Text style={styles.itemText}>{item.responsible}</Text>
+                </View>
+            )}
         </View>
     );
 
-    /*──────── Modal form UI – revamped ────────*/
-    const renderForm = () => (
-        <KeyboardAvoidingView
-            style={styles.modalOverlay}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-            <Pressable style={styles.modalBG} onPress={() => setFormVisible(false)} />
+    /*──────── Modal form UI ────────*/
+    function renderForm() {
+        // Ship admin için gemi seçim listesini filtrele
+        const availableShips = isShipAdmin && user?.shipId
+            ? ships.filter(s => s.id === user.shipId)
+            : ships;
 
-            <ScrollView
-                style={styles.modalContainer}
-                contentContainerStyle={{ paddingBottom: 30 }}
-                showsVerticalScrollIndicator={false}
+        return (
+            <KeyboardAvoidingView
+                style={styles.modalOverlay}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             >
-                {/* Header */}
-                <View style={styles.modalHeader}>
-                    <Text style={styles.modalTitle}>
-                        {isEditing ? 'Ekipmanı Düzenle' : 'Yeni Ekipman'}
-                    </Text>
-                    <TouchableOpacity onPress={() => setFormVisible(false)}>
-                        <Ionicons
-                            name="close"
-                            size={24}
-                            color={COLORS.textSecondary}
+                <Pressable
+                    style={styles.modalBG}
+                    onPress={() => setFormVisible(false)}
+                />
+
+                <ScrollView
+                    style={styles.modalContainer}
+                    contentContainerStyle={{ paddingBottom: 30 }}
+                    showsVerticalScrollIndicator={false}
+                >
+                    {/* Header */}
+                    <View style={styles.modalHeader}>
+                        <Text style={styles.modalTitle}>
+                            {isEditing ? 'Ekipmanı Düzenle' : 'Yeni Ekipman'}
+                        </Text>
+                        <TouchableOpacity onPress={() => setFormVisible(false)}>
+                            <Ionicons name="close" size={24} color={COLORS.textSecondary} />
+                        </TouchableOpacity>
+                    </View>
+
+                    {/* Fields */}
+                    <DropdownSelect
+                        label="Gemi"
+                        value={selectedShipId}
+                        onChange={(shipId) => {
+                            setSelectedShipId(shipId);
+                            const name =
+                                ships.find((s) => s.id === shipId)?.name || '';
+                            setSelectedShipName(name);
+                        }}
+                        options={availableShips.map((s) => ({
+                            label: s.name,
+                            value: s.id,
+                        }))}
+                    />
+
+                    <DropdownSelect
+                        label="Ekipman Türü"
+                        value={type}
+                        onChange={setType}
+                        options={equipmentTypes.map((t) => ({
+                            label: t,
+                            value: t,
+                        }))}
+                    />
+
+                    <InputField
+                        icon="pricetag-outline"
+                        placeholder="Marka"
+                        value={brand}
+                        onChangeText={setBrand}
+                    />
+                    <InputField
+                        icon="barcode-outline"
+                        placeholder="Seri No"
+                        value={serialNo}
+                        onChangeText={setSerialNo}
+                    />
+
+                    {/* Start Date */}
+                    <TouchableOpacity onPress={() => setShowStartDatePicker(true)}>
+                        <InputField
+                            icon="calendar-outline"
+                            placeholder="Başlangıç Tarihi"
+                            value={startDate}
+                            onChangeText={setStartDate}
                         />
                     </TouchableOpacity>
-                </View>
+                    {showStartDatePicker && (
+                        <DateTimePicker
+                            value={startDate ? new Date(startDate) : new Date()}
+                            mode="date"
+                            display={Platform.OS === 'ios' ? 'inline' : 'default'}
+                            maximumDate={new Date()}
+                            onChange={(_, date) => {
+                                setShowStartDatePicker(false);
+                                if (date)
+                                    setStartDate(date.toISOString().slice(0, 10));
+                            }}
+                        />
+                    )}
 
-                {/* Fields */}
-                <DropdownSelect
-                    label="Gemi"
-                    value={selectedShip}
-                    onChange={setSelectedShip}
-                    options={ships.map((s: any) => ({
-                        label: s.name,
-                        value: s.name,
-                    }))}
-                />
+                    <DropdownSelect
+                        label="Sorumlu"
+                        value={selectedResponsible}
+                        onChange={setSelectedResponsible}
+                        options={users.map((u) => ({
+                            label: u.name || u.email,
+                            value: u.name || u.email,
+                        }))}
+                    />
 
-                <DropdownSelect
-                    label="Ekipman Türü"
-                    value={type}
-                    onChange={setType}
-                    options={equipmentTypes.map((t) => ({
-                        label: t,
-                        value: t,
-                    }))}
-                />
-
-                <InputField
-                    icon="pricetag-outline"
-                    placeholder="Marka"
-                    value={brand}
-                    onChangeText={setBrand}
-                />
-                <InputField
-                    icon="barcode-outline"
-                    placeholder="Seri No"
-                    value={serialNo}
-                    onChangeText={setSerialNo}
-                />
-
-                {/* Start Date – date picker */}
-                <TouchableOpacity onPress={() => setShowStartDatePicker(true)}>
                     <InputField
-                        icon="calendar-outline"
-                        placeholder="Başlangıç Tarihi"
-                        value={startDate}
-                        onChangeText={setStartDate}
-                    />
-                </TouchableOpacity>
-
-                {showStartDatePicker && (
-                    <DateTimePicker
-                        value={startDate ? new Date(startDate) : new Date()}
-                        mode="date"
-                        display={Platform.OS === 'ios' ? 'inline' : 'default'}
-                        maximumDate={new Date()}
-                        onChange={(e, date) => {
-                            setShowStartDatePicker(false);
-                            if (date) {
-                                setStartDate(date.toISOString().slice(0, 10));
-                            }
-                        }}
-                    />
-                )}
-
-
-                <DropdownSelect
-                    label="Sorumlu"
-                    value={selectedResponsible}
-                    onChange={setSelectedResponsible}
-                    options={users.map((u: any) => ({
-                        label: u.name || u.email,
-                        value: u.name || u.email,
-                    }))}
-                />
-
-                <InputField
-                    icon="time-outline"
-                    placeholder="Çalışma Saati"
-                    value={workingHours}
-                    onChangeText={setWorkingHours}
-                    keyboardType="numeric"
-                />
-
-                {/* Last updated – date picker */}
-                <TouchableOpacity
-                    onPress={() => {
-                        Platform.OS === 'android'
-                            ? setShowDatePicker(true)
-                            : setShowDatePicker(true);
-                    }}
-                >
-                    <InputField
-                        icon="calendar-outline"
-                        placeholder="Son Güncellenme"
-                        value={lastUpdated}
-                        onChangeText={setLastUpdated}
-                    />
-                </TouchableOpacity>
-
-                {showDatePicker && (
-                    <DateTimePicker
-                        value={
-                            lastUpdated
-                                ? new Date(lastUpdated)
-                                : new Date()
-                        }
-                        mode="date"
-                        display={Platform.OS === 'ios' ? 'inline' : 'default'}
-                        maximumDate={new Date()}
-                        onChange={(e, date) => {
-                            setShowDatePicker(false);
-                            if (date) {
-                                setLastUpdated(date.toISOString().slice(0, 10));
-                            }
-                        }}
-                    />
-                )}
-
-                {/* Maintenance type chips */}
-                <Text style={[styles.label, { marginTop: 12 }]}>
-                    Bakım Türü <Text style={{ color: COLORS.accent }}>✱</Text>
-                </Text>
-                <ChipSelect
-                    options={maintenanceTypes}
-                    value={maintenanceType}
-                    onChange={setMaintenanceType}
-                />
-
-                {['Periyodik', 'Her İkisi'].includes(maintenanceType) && (
-                    <InputField
-                        icon="repeat-outline"
-                        placeholder="Periyodik Bakım (gün)"
-                        value={periodicDays}
-                        onChangeText={setPeriodicDays}
+                        icon="time-outline"
+                        placeholder="Çalışma Saati"
+                        value={workingHours}
+                        onChangeText={setWorkingHours}
                         keyboardType="numeric"
                     />
-                )}
-                {['Saatlik', 'Her İkisi'].includes(maintenanceType) && (
-                    <InputField
-                        icon="repeat-outline"
-                        placeholder="Bakım Saat"
-                        value={maintenanceHour}
-                        onChangeText={setMaintenanceHour}
-                        keyboardType="numeric"
-                    />
-                )}
 
-
-                {/* Buttons */}
-                <View style={styles.rowBetween}>
-                    <TouchableOpacity style={styles.btnSave} onPress={handleSave}>
-                        <Text style={styles.btnText}>
-                            {isEditing ? 'Güncelle' : 'Kaydet'}
-                        </Text>
+                    {/* Last updated */}
+                    <TouchableOpacity onPress={() => setShowDatePicker(true)}>
+                        <InputField
+                            icon="calendar-outline"
+                            placeholder="Son Güncellenme"
+                            value={lastUpdated}
+                            onChangeText={setLastUpdated}
+                        />
                     </TouchableOpacity>
-                    <TouchableOpacity
-                        style={styles.btnCancel}
-                        onPress={() => {
-                            resetForm();
-                            setFormVisible(false);
-                        }}
+                    {showDatePicker && (
+                        <DateTimePicker
+                            value={
+                                lastUpdated ? new Date(lastUpdated) : new Date()
+                            }
+                            mode="date"
+                            display={Platform.OS === 'ios' ? 'inline' : 'default'}
+                            maximumDate={new Date()}
+                            onChange={(_, date) => {
+                                setShowDatePicker(false);
+                                if (date)
+                                    setLastUpdated(date.toISOString().slice(0, 10));
+                            }}
+                        />
+                    )}
+
+                    {/* Maintenance type chips */}
+                    <Text
+                        style={[styles.label, { marginTop: 12 }]}
                     >
-                        <Text style={styles.btnText}>Vazgeç</Text>
-                    </TouchableOpacity>
-                </View>
-            </ScrollView>
-        </KeyboardAvoidingView>
-    );
+                        Bakım Türü <Text style={{ color: COLORS.accent }}>✱</Text>
+                    </Text>
+                    <ChipSelect
+                        options={maintenanceTypes}
+                        value={maintenanceType}
+                        onChange={setMaintenanceType}
+                    />
+
+                    {['Periyodik', 'Her İkisi'].includes(maintenanceType) && (
+                        <InputField
+                            icon="repeat-outline"
+                            placeholder="Periyodik Bakım (gün)"
+                            value={periodicDays}
+                            onChangeText={setPeriodicDays}
+                            keyboardType="numeric"
+                        />
+                    )}
+                    {['Saatlik', 'Her İkisi'].includes(maintenanceType) && (
+                        <InputField
+                            icon="repeat-outline"
+                            placeholder="Bakım Saat"
+                            value={maintenanceHour}
+                            onChangeText={setMaintenanceHour}
+                            keyboardType="numeric"
+                        />
+                    )}
+
+                    {/* Buttons */}
+                    <View style={styles.rowBetween}>
+                        <TouchableOpacity style={styles.btnSave} onPress={handleSave}>
+                            <Text style={styles.btnText}>
+                                {isEditing ? 'Güncelle' : 'Kaydet'}
+                            </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={styles.btnCancel}
+                            onPress={() => {
+                                resetForm();
+                                setFormVisible(false);
+                            }}
+                        >
+                            <Text style={styles.btnText}>Vazgeç</Text>
+                        </TouchableOpacity>
+                    </View>
+                </ScrollView>
+            </KeyboardAvoidingView>
+        );
+    }
 
     /*──────── JSX ────────*/
+    if (!user) {
+        return (
+            <View style={styles.center}>
+                <ActivityIndicator size="large" color={COLORS.accent} />
+            </View>
+        );
+    }
+
     return (
         <View style={styles.container}>
             {loading ? (
@@ -624,21 +684,25 @@ const EquipmentList = () => {
                     ListEmptyComponent={() => (
                         <View style={styles.center}>
                             <Text style={{ color: COLORS.textSecondary }}>
-                                Henüz bir ekipman eklenmemiş.
+                                {isCrewMember
+                                    ? 'Size atanmış ekipman bulunmuyor.'
+                                    : 'Görüntülenecek ekipman bulunamadı.'}
                             </Text>
                         </View>
                     )}
                 />
             )}
 
-            {/* FAB */}
-            <TouchableOpacity
-                style={styles.fab}
-                onPress={openCreate}
-                activeOpacity={0.9}
-            >
-                <Ionicons name="add" size={30} color={COLORS.textPrimary} />
-            </TouchableOpacity>
+            {/* FAB - Sadece admin ve ship admin görebilir */}
+            {(isAdmin || isShipAdmin) && (
+                <TouchableOpacity
+                    style={styles.fab}
+                    onPress={openCreate}
+                    activeOpacity={0.9}
+                >
+                    <Ionicons name="add" size={30} color={COLORS.textPrimary} />
+                </TouchableOpacity>
+            )}
 
             {/* Add/Edit Modal */}
             <Modal
@@ -650,7 +714,7 @@ const EquipmentList = () => {
                 {renderForm()}
             </Modal>
 
-            {/*──────── Hours Update Modal (unchanged) ────────*/}
+            {/* Hours Update Modal */}
             <Modal
                 visible={updateHoursVisible}
                 animationType="fade"
@@ -682,10 +746,7 @@ const EquipmentList = () => {
                         <TouchableOpacity
                             style={styles.btnSave}
                             onPress={async () => {
-                                if (
-                                    !newWorkingHours ||
-                                    isNaN(Number(newWorkingHours))
-                                ) {
+                                if (!newWorkingHours || isNaN(Number(newWorkingHours))) {
                                     Alert.alert('Uyarı', 'Geçerli bir sayı girin.');
                                     return;
                                 }
@@ -699,10 +760,7 @@ const EquipmentList = () => {
                                                 .slice(0, 10),
                                         }
                                     );
-                                    Alert.alert(
-                                        'Başarılı',
-                                        'Çalışma saati güncellendi.'
-                                    );
+                                    Alert.alert('Başarılı', 'Çalışma saati güncellendi.');
                                     setUpdateHoursVisible(false);
                                 } catch (err) {
                                     console.error(err);
@@ -726,6 +784,7 @@ const EquipmentList = () => {
 };
 
 export default EquipmentList;
+
 
 /*──────────────── Styles ────────────────*/
 const styles = StyleSheet.create({
@@ -762,11 +821,7 @@ const styles = StyleSheet.create({
         gap: 6,
         marginBottom: 6,
     },
-    headerActions: {
-        flexDirection: 'row',
-        marginLeft: 'auto',
-        gap: 14,
-    },
+    headerActions: { flexDirection: 'row', marginLeft: 'auto', gap: 14 },
     itemTitle: {
         fontSize: 16,
         color: COLORS.textPrimary,
@@ -798,7 +853,10 @@ const styles = StyleSheet.create({
 
     /* modal (shared) */
     modalOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    modalBG: { ...StyleSheet.absoluteFillObject, backgroundColor: COLORS.overlay },
+    modalBG: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: COLORS.overlay,
+    },
     modalContainer: {
         width: '93%',
         backgroundColor: COLORS.surface,
@@ -866,17 +924,8 @@ const styles = StyleSheet.create({
     },
 
     /* chips */
-    chipRow: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: 10,
-        marginBottom: 14,
-    },
-    chip: {
-        paddingVertical: 8,
-        paddingHorizontal: 14,
-        borderRadius: 20,
-    },
+    chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 14 },
+    chip: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20 },
 
     /* buttons */
     btnSave: {

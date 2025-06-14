@@ -7,7 +7,8 @@ import {
     TouchableOpacity,
     Text,
     ScrollView,
-    Pressable
+    Pressable,
+    Alert
 } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
@@ -20,6 +21,7 @@ import { UserProvider, useUser } from './src/UserContext';
 import Login from './src/Login';
 import Home from './src/Home';
 import AddShip from './src/tabs/AddShip';
+import NotificationService from './NotificationService';
 
 // Kendi dark tema ayarımız (DefaultTheme üzerinde bazı renkleri değiştiriyoruz)
 const MyDarkTheme = {
@@ -114,6 +116,38 @@ const AppNavigator = () => {
         return () => unsubscribe();
     }, []);
 
+    // Bildirim sistemi başlatma
+    useEffect(() => {
+        if (user?.isUserLoggedIn && user?.uid) {
+            // Push token al ve kaydet
+            NotificationService.registerForPushNotifications(user.uid)
+                .then(token => {
+                    if (token) {
+                        console.log('Push token alındı:', token);
+                    }
+                })
+                .catch(error => {
+                    console.error('Push token alınamadı:', error);
+                });
+
+            // Bildirim dinleyicilerini başlat
+            NotificationService.initializeListeners();
+
+            // Bakım hatırlatmalarını kontrol et
+            NotificationService.checkAndScheduleMaintenances();
+
+            // Her 24 saatte bir bakım kontrolü yap
+            const interval = setInterval(() => {
+                NotificationService.checkAndScheduleMaintenances();
+            }, 24 * 60 * 60 * 1000);
+
+            return () => {
+                clearInterval(interval);
+                NotificationService.removeListeners();
+            };
+        }
+    }, [user?.isUserLoggedIn, user?.uid]);
+
     if (isLoading) {
         return (
             <View style={styles.loadingContainer}>
@@ -121,6 +155,16 @@ const AppNavigator = () => {
             </View>
         );
     }
+
+    // Test bildirimi gönder (admin için)
+    const sendTestNotification = async () => {
+        try {
+            await NotificationService.sendTestNotification();
+            Alert.alert('Başarılı', 'Test bildirimi gönderildi! 3 saniye içinde görünecek.');
+        } catch (error) {
+            Alert.alert('Hata', 'Bildirim gönderilemedi');
+        }
+    };
 
     // Profil Modal
     const renderProfileModal = () => (
@@ -146,6 +190,17 @@ const AppNavigator = () => {
                     <Text style={styles.modalText}>Kullanıcı: {user?.userName}</Text>
                     <Text style={styles.modalText}>E-mail: {user?.email}</Text>
                     <Text style={styles.modalText}>Yetki: {user?.role}</Text>
+
+                    {/* Admin için test bildirimi butonu */}
+                    {user?.role === 'main-admin' && (
+                        <TouchableOpacity
+                            style={styles.testNotificationButton}
+                            onPress={sendTestNotification}
+                        >
+                            <Ionicons name="notifications-outline" size={20} color="#fff" />
+                            <Text style={styles.testNotificationText}>Test Bildirimi Gönder</Text>
+                        </TouchableOpacity>
+                    )}
                 </View>
             </View>
         </Modal>
@@ -176,7 +231,13 @@ const AppNavigator = () => {
                         <Text style={styles.modalText}>
                             PMR - Planned Maintenance and Repair Uygulaması{'\n'}
                             Sürüm: 1.0.0{'\n'}
-                            Gemi bakım ve arıza takibi için geliştirildi.
+                            Gemi bakım ve arıza takibi için geliştirildi.{'\n\n'}
+                            📱 Özellikler:{'\n'}
+                            • Planlı bakım takibi{'\n'}
+                            • Arıza yönetimi{'\n'}
+                            • Ekipman yönetimi{'\n'}
+                            • Bildirim sistemi{'\n'}
+                            • Fotoğraflı arıza kaydı
                         </Text>
                     </ScrollView>
                 </View>
@@ -211,7 +272,7 @@ const AppNavigator = () => {
                         <Stack.Screen
                             name="Home"
                             options={{
-                                title: 'Ana Sayfa',
+                                title: 'PMR System',
                                 headerLeft: () => (
                                     <TouchableOpacity
                                         style={styles.profileButton}
@@ -240,12 +301,28 @@ const AppNavigator = () => {
 
                                         <TouchableOpacity
                                             onPress={() => {
-                                                const auth = getAuth();
-                                                signOut(auth)
-                                                    .then(() => console.log('Çıkış yapıldı'))
-                                                    .catch((error) =>
-                                                        console.error('Çıkış hatası:', error)
-                                                    );
+                                                Alert.alert(
+                                                    'Çıkış Yap',
+                                                    'Çıkış yapmak istediğinize emin misiniz?',
+                                                    [
+                                                        {
+                                                            text: 'İptal',
+                                                            style: 'cancel'
+                                                        },
+                                                        {
+                                                            text: 'Çıkış Yap',
+                                                            style: 'destructive',
+                                                            onPress: () => {
+                                                                const auth = getAuth();
+                                                                signOut(auth)
+                                                                    .then(() => console.log('Çıkış yapıldı'))
+                                                                    .catch((error) =>
+                                                                        console.error('Çıkış hatası:', error)
+                                                                    );
+                                                            }
+                                                        }
+                                                    ]
+                                                );
                                             }}
                                         >
                                             <Ionicons
@@ -264,7 +341,10 @@ const AppNavigator = () => {
                             {(props) => <Home {...props} userRole={user?.role} />}
                         </Stack.Screen>
 
-                        <Stack.Screen name="AddShip">
+                        <Stack.Screen
+                            name="AddShip"
+                            options={{ title: 'Gemi İşlemleri' }}
+                        >
                             {(props) => <AddShip {...props} userRole={user?.role} />}
                         </Stack.Screen>
                     </>
@@ -338,6 +418,21 @@ const styles = StyleSheet.create({
         fontSize: 14,
         color: '#ccc',
         marginBottom: 5
+    },
+    testNotificationButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#4ECDC4',
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+        borderRadius: 6,
+        marginTop: 12,
+        alignSelf: 'center'
+    },
+    testNotificationText: {
+        color: '#fff',
+        marginLeft: 6,
+        fontWeight: '600',
+        fontSize: 13
     }
 });
-

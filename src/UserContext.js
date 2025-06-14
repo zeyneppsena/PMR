@@ -8,6 +8,7 @@ export const UserProvider = ({ children }) => {
     const [user, setUser] = useState({
         isUserLoggedIn: false,
         userName: '',
+        shipId: '',
         email: '',
         uid: '',
         role: '', // 🔥 role alanı eklendi
@@ -28,6 +29,7 @@ export const UserProvider = ({ children }) => {
                         setUser({
                             isUserLoggedIn: true,
                             userName: userData.name,
+                            shipId: userData.shipId,
                             email: userData.email,
                             uid: firebaseUser.uid,
                             role: userData.role || 'gemi-personeli', // 🔒 varsayılan role
@@ -45,6 +47,7 @@ export const UserProvider = ({ children }) => {
                     email: '',
                     uid: '',
                     role: '',
+                    shipId: '',
                 });
             }
         });

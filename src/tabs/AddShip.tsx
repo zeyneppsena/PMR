@@ -42,7 +42,6 @@ const AddShip = ({ navigation, route, userRole }) => {
     const [name, setName] = useState('');
     const [imo, setImo] = useState('');
     const [port, setPort] = useState('');
-    const [captain, setCaptain] = useState('');
     const [users, setUsers] = useState<string[]>([]);
     const [availableUsers, setAvailableUsers] = useState<any[]>([]);
     const [userModalVisible, setUserModalVisible] = useState(false);
@@ -52,7 +51,6 @@ const AddShip = ({ navigation, route, userRole }) => {
             setName(editingShip.name);
             setImo(editingShip.imo);
             setPort(editingShip.port);
-            setCaptain(editingShip.captain);
             setUsers(editingShip.users || []);
         }
     }, [editingShip]);
@@ -67,7 +65,7 @@ const AddShip = ({ navigation, route, userRole }) => {
 
     const handleSave = async () => {
         if (!isAdmin) return Alert.alert('Yetkisiz', 'Bu işlemi yapamazsınız.');
-        if (!name || !imo || !port || !captain)
+        if (!name || !imo || !port )
             return Alert.alert('Eksik Bilgi', 'Lütfen tüm alanları doldurun.');
 
         try {
@@ -76,7 +74,6 @@ const AddShip = ({ navigation, route, userRole }) => {
                     name,
                     imo,
                     port,
-                    captain,
                     users,
                 });
                 Alert.alert('Güncellendi', 'Gemi bilgileri güncellendi.');
@@ -85,7 +82,6 @@ const AddShip = ({ navigation, route, userRole }) => {
                     name,
                     imo,
                     port,
-                    captain,
                     users: [],
                 });
                 Alert.alert('Kaydedildi', 'Gemi başarıyla eklendi.');
@@ -121,7 +117,6 @@ const AddShip = ({ navigation, route, userRole }) => {
                     ['Gemi Adı', name, setName, 'örn. MV Oceanic', 'default'],
                     ['IMO No', imo, setImo, 'örn. 1234567', 'numeric'],
                     ['Liman', port, setPort, 'örn. İstanbul', 'default'],
-                    ['Kaptan', captain, setCaptain, 'örn. Ahmet Yılmaz', 'default'],
                 ].map(([label, val, setter, ph, kb]) => (
                     <View key={label as string} style={{ marginTop: 18 }}>
                         <TextInput

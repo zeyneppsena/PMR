@@ -109,10 +109,6 @@ const ShipList = ({ navigation, userRole }) => {
                 <Ionicons name="barcode-outline" size={16} color={COLORS.accent} />
                 <Text style={styles.itemText}>IMO: {item.imo}</Text>
             </View>
-            <View style={styles.row}>
-                <Ionicons name="person-outline" size={16} color={COLORS.accent} />
-                <Text style={styles.itemText}>Kaptan: {item.captain}</Text>
-            </View>
         </View>
     );
 

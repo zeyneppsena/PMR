@@ -8,7 +8,7 @@ import {
     Easing,
     Alert,
     Platform,
-    StyleSheet
+    StyleSheet,
 } from 'react-native';
 import { getAuth, signInWithEmailAndPassword } from '@firebase/auth';
 import { app } from '../firebaseConfig';
@@ -20,11 +20,9 @@ const Login = ({ navigation }) => {
     const [password, setPassword] = useState('');
     const [isPasswordVisible, setIsPasswordVisible] = useState(false);
 
-    // Opacity ve scale animasyon değerleri
     const opacity = useRef(new Animated.Value(0)).current;
     const scale = useRef(new Animated.Value(0.8)).current;
 
-    // Bileşen ilk render olduğunda animasyon başlat
     useEffect(() => {
         Animated.parallel([
             Animated.timing(opacity, {
@@ -45,40 +43,40 @@ const Login = ({ navigation }) => {
         try {
             const auth = getAuth(app);
             await signInWithEmailAndPassword(auth, email, password);
-            navigation.navigate('Home'); // Giriş başarılıysa yönlendirilecek ekran
+            navigation.navigate('Home');
         } catch (error) {
             let errorMessage = '';
 
             switch (error.code) {
                 case 'auth/user-not-found':
-                    errorMessage = 'User not found. Please check your email.';
+                    errorMessage = 'Kullanıcı bulunamadı. Lütfen e-posta adresinizi kontrol edin.';
                     break;
                 case 'auth/wrong-password':
-                    errorMessage = 'Incorrect password. Please try again.';
+                    errorMessage = 'Şifre hatalı. Lütfen tekrar deneyin.';
                     break;
                 case 'auth/invalid-email':
-                    errorMessage = 'Invalid email. Please provide a valid email address.';
+                    errorMessage = 'Geçersiz e-posta. Lütfen geçerli bir adres girin.';
                     break;
                 case 'auth/user-disabled':
-                    errorMessage = 'Your account has been disabled. Please contact support.';
+                    errorMessage = 'Hesabınız devre dışı bırakılmış. Destek ekibiyle iletişime geçin.';
                     break;
                 case 'auth/too-many-requests':
-                    errorMessage = 'Too many unsuccessful login attempts. Please try again later.';
+                    errorMessage = 'Çok fazla başarısız giriş denemesi. Lütfen daha sonra tekrar deneyin.';
                     break;
                 case 'auth/invalid-credential':
-                    errorMessage = 'Invalid credentials. Please check your email and password.';
+                    errorMessage = 'Geçersiz kimlik bilgileri. E-posta ve şifrenizi kontrol edin.';
                     break;
                 case 'auth/email-already-in-use':
-                    errorMessage = 'The email address is already in use by another account.';
+                    errorMessage = 'Bu e-posta adresi zaten kullanılmakta.';
                     break;
                 case 'auth/weak-password':
-                    errorMessage = 'The password is too weak. Please choose a stronger password.';
+                    errorMessage = 'Şifre çok zayıf. Lütfen daha güçlü bir şifre seçin.';
                     break;
                 default:
-                    errorMessage = `Unexpected error: ${error.code}`;
+                    errorMessage = `Beklenmeyen hata: ${error.code}`;
             }
 
-            Alert.alert('Error', errorMessage);
+            Alert.alert('Hata', errorMessage);
         }
     };
 
@@ -95,25 +93,25 @@ const Login = ({ navigation }) => {
                         styles.container,
                         {
                             opacity,
-                            transform: [{ scale }]
+                            transform: [{ scale }],
                         },
                     ]}
                 >
                     {/* Üst Başlık */}
                     <View style={styles.headerContainer}>
-                        <Text style={styles.mainTitle}>PLANNED MAINTENANCE</Text>
-                        <Text style={styles.mainTitle}>and REPAIR</Text>
+                        <Text style={styles.mainTitle}>PLANLI BAKIM</Text>
+                        <Text style={styles.mainTitle}>VE ARIZA TAKİP</Text>
                     </View>
 
                     {/* Giriş Formu */}
                     <View style={styles.loginContainer}>
-                        <Text style={styles.title}>Login</Text>
+                        <Text style={styles.title}>Giriş</Text>
 
                         <View style={styles.inputContainer}>
-                            <Icon name="envelope" size={20} color="#ccc" style={styles.icon}/>
+                            <Icon name="envelope" size={20} color="#ccc" style={styles.icon} />
                             <TextInput
                                 style={styles.input}
-                                placeholder="Email"
+                                placeholder="E-posta"
                                 placeholderTextColor="#666"
                                 value={email}
                                 onChangeText={setEmail}
@@ -123,10 +121,10 @@ const Login = ({ navigation }) => {
                         </View>
 
                         <View style={styles.inputContainer}>
-                            <Icon name="lock" size={25} color="#ccc" style={styles.icon}/>
+                            <Icon name="lock" size={25} color="#ccc" style={styles.icon} />
                             <TextInput
                                 style={styles.input}
-                                placeholder="Password"
+                                placeholder="Şifre"
                                 placeholderTextColor="#666"
                                 value={password}
                                 onChangeText={setPassword}
@@ -148,7 +146,7 @@ const Login = ({ navigation }) => {
                             style={[styles.button, styles.loginButton]}
                             onPress={handleLogin}
                         >
-                            <Text style={styles.buttonText}>Login</Text>
+                            <Text style={styles.buttonText}>Giriş Yap</Text>
                         </TouchableOpacity>
                     </View>
                 </Animated.View>
@@ -160,14 +158,14 @@ const Login = ({ navigation }) => {
 const styles = StyleSheet.create({
     flexContainer: {
         flex: 1,
-        backgroundColor: '#1c1c1e', // Harici kaydırma arka planı da koyu
+        backgroundColor: '#1c1c1e',
     },
     scrollContainer: {
         flexGrow: 1,
     },
     darkBackgroundContainer: {
         flex: 1,
-        backgroundColor: '#1c1c1e', // Koyu arka plan
+        backgroundColor: '#1c1c1e',
     },
     container: {
         flex: 1,
@@ -218,7 +216,7 @@ const styles = StyleSheet.create({
         flex: 1,
         height: 45,
         fontSize: 16,
-        color: '#fff',   // metin rengi beyaz
+        color: '#fff',
     },
     button: {
         width: '85%',
@@ -230,7 +228,7 @@ const styles = StyleSheet.create({
         elevation: 3,
     },
     loginButton: {
-        backgroundColor: '#4ECDC4', // vurgu rengi
+        backgroundColor: '#4ECDC4',
     },
     buttonText: {
         color: '#fff',
